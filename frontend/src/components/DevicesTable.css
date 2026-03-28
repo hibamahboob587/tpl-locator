@@ -1,0 +1,346 @@
+/* ─── Container ───────────────────────────────── */
+.devices-table-container {
+  width: 100%;
+  overflow-x: auto;
+  overflow-y: auto;
+  max-height: calc(100vh - 220px);
+}
+
+.devices-table-container::-webkit-scrollbar { width: 4px; height: 4px; }
+.devices-table-container::-webkit-scrollbar-track { background: transparent; }
+.devices-table-container::-webkit-scrollbar-thumb { background: #2d2d2d; border-radius: 4px; }
+.devices-table-container::-webkit-scrollbar-thumb:hover { background: #3f3f46; }
+
+/* ─── Table ───────────────────────────────────── */
+.devices-table {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+  font-size: 13.5px;
+  min-width: 1100px;
+}
+
+/* ─── Header ──────────────────────────────────── */
+.devices-table thead {
+  background: #1e1e1e;
+  position: sticky;
+  top: 0;
+  z-index: 10;
+}
+
+.devices-table th {
+  padding: 13px 16px;
+  text-align: left;
+  color: #a3a3a3;
+  font-weight: 600;
+  font-size: 11.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  border-bottom: 2px solid #2d2d2d;
+  white-space: nowrap;
+  cursor: pointer;
+  user-select: none;
+  transition: color 0.15s;
+}
+
+.devices-table th:hover {
+  color: #ffffff;
+}
+
+.th-inner {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.col-check {
+  width: 42px;
+  padding: 13px 12px !important;
+}
+
+.sort-icon {
+  font-size: 11px;
+}
+.sort-icon.inactive {
+  opacity: 0.3;
+}
+.sort-icon.active {
+  color: #7f1d1d;
+  opacity: 1;
+}
+
+/* ─── Body Rows ───────────────────────────────── */
+.devices-table tbody tr {
+  background: #0f0f0f;
+  border-bottom: 1px solid #1e1e1e;
+  transition: background 0.15s;
+}
+
+.devices-table tbody tr:hover {
+  background: #1a1a1a;
+}
+
+.devices-table tbody tr.selected {
+  background: rgba(127, 29, 29, 0.08);
+  border-color: rgba(127, 29, 29, 0.25);
+}
+
+.devices-table td {
+  padding: 13px 16px;
+  color: #e5e5e5;
+  vertical-align: middle;
+  border-bottom: 1px solid #1e1e1e;
+}
+
+/* ─── Checkbox ────────────────────────────────── */
+.devices-table input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  cursor: pointer;
+  accent-color: #7f1d1d;
+}
+
+/* ─── Serial Number Cell ──────────────────────── */
+.cell-serial {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.device-icon {
+  width: 34px;
+  height: 34px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(135deg, #7f1d1d, #991b1b);
+  border-radius: 7px;
+  color: white;
+  flex-shrink: 0;
+}
+
+.device-icon svg {
+  width: 18px;
+  height: 18px;
+}
+
+.serial-number {
+  font-family: "JetBrains Mono", monospace;
+  font-size: 13px;
+  font-weight: 600;
+  color: #ffffff;
+  line-height: 1.2;
+}
+
+/* Status dot under serial */
+.status-dot-inline {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+  font-weight: 500;
+  text-transform: capitalize;
+  margin-top: 3px;
+}
+
+.status-dot-inline::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  display: inline-block;
+  animation: blink 2s ease-in-out infinite;
+}
+
+.status-dot-inline.status-online {
+  color: #10b981;
+}
+.status-dot-inline.status-offline {
+  color: #ef4444;
+}
+.status-dot-inline.status-online::before {
+  background: #10b981;
+}
+.status-dot-inline.status-offline::before {
+  background: #ef4444;
+  animation: none;
+}
+
+@keyframes blink {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.4;
+  }
+}
+
+/* ─── Client Cell ─────────────────────────────── */
+.cell-client {
+  display: inline-block;
+  padding: 3px 10px;
+  background: rgba(59, 130, 246, 0.12);
+  border: 1px solid rgba(59, 130, 246, 0.25);
+  border-radius: 5px;
+  color: #60a5fa;
+  font-size: 12.5px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+/* ─── Assigned User Cell ──────────────────────── */
+.cell-user {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  white-space: nowrap;
+}
+
+.user-avatar {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #7f1d1d, #b91c1c);
+  color: white;
+  font-size: 12px;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+/* ─── Datetime Cells ──────────────────────────── */
+.cell-datetime {
+  font-family: "JetBrains Mono", monospace;
+  font-size: 12px;
+  color: #a3a3a3;
+  white-space: nowrap;
+}
+
+/* ─── Accuracy Cell ───────────────────────────── */
+.cell-accuracy {
+  font-family: "JetBrains Mono", monospace;
+  font-size: 13px;
+  color: #c084fc;
+  font-weight: 500;
+}
+
+/* ─── Battery Cell ────────────────────────────── */
+.cell-battery {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 110px;
+}
+
+.battery-bar-wrap {
+  flex: 1;
+  height: 6px;
+  background: #2d2d2d;
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.battery-bar-fill {
+  height: 100%;
+  border-radius: 3px;
+  transition: width 0.4s ease;
+}
+
+.battery-text {
+  font-family: "JetBrains Mono", monospace;
+  font-size: 12px;
+  font-weight: 600;
+  min-width: 34px;
+  text-align: right;
+}
+
+/* ─── Action Buttons ──────────────────────────── */
+.action-buttons {
+  display: flex;
+  gap: 6px;
+}
+
+.action-btn {
+  width: 30px;
+  height: 30px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #1e1e1e;
+  border: 1px solid #2d2d2d;
+  border-radius: 6px;
+  color: #a3a3a3;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.action-btn:hover {
+  background: #7f1d1d;
+  border-color: #7f1d1d;
+  color: white;
+  transform: translateY(-1px);
+  box-shadow: 0 3px 8px rgba(127, 29, 29, 0.4);
+}
+
+.action-btn svg {
+  width: 14px;
+  height: 14px;
+}
+
+.action-btn.unbind-btn:hover {
+  background: #dc2626;
+  border-color: #dc2626;
+}
+
+/* ─── Empty State ─────────────────────────────── */
+.empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 72px 20px;
+  color: #555;
+}
+
+.empty-state svg {
+  width: 52px;
+  height: 52px;
+  margin-bottom: 14px;
+  opacity: 0.3;
+}
+
+.empty-state p {
+  font-size: 15px;
+  font-weight: 500;
+}
+
+/* ─── Table Footer ────────────────────────────── */
+.table-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 20px;
+  border-top: 1px solid #1e1e1e;
+  background: #0f0f0f;
+  font-size: 13px;
+  color: #555;
+}
+
+.selected-count {
+  color: #7f1d1d;
+  font-weight: 600;
+}
+
+/* ─── Responsive ──────────────────────────────── */
+@media (max-width: 900px) {
+  .devices-table {
+    font-size: 12px;
+  }
+  .devices-table th,
+  .devices-table td {
+    padding: 10px 12px;
+  }
+}

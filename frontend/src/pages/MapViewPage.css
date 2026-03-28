@@ -1,0 +1,53 @@
+.mv-page { display:flex; flex-direction:column; height:calc(100vh - 64px); background:#0f0f0f; overflow:visible; }
+
+/* Top bar */
+.mv-topbar { display:flex; align-items:center; justify-content:space-between; padding:10px 20px; background:#1a1a1a; border-bottom:1px solid #2d2d2d; flex-shrink:0; gap:12px; flex-wrap:wrap; position:relative; z-index:1000; overflow:visible; }
+.mv-topbar-left  { display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
+.mv-topbar-right { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+.mv-topbar-label { font-size:12px; font-weight:700; text-transform:uppercase; letter-spacing:.07em; color:#555; }
+.mv-topbar-sn { font-family:'JetBrains Mono',monospace; font-size:13px; font-weight:600; color:#fca5a5; background:rgba(127,29,29,.15); padding:3px 10px; border-radius:6px; border:1px solid rgba(127,29,29,.3); }
+
+.mv-refresh-btn { display:flex; align-items:center; gap:6px; padding:7px 14px; background:#7f1d1d; border:none; border-radius:7px; color:white; font-size:13px; font-weight:600; cursor:pointer; transition:background .2s; }
+.mv-refresh-btn:hover:not(:disabled) { background:#991b1b; }
+.mv-refresh-btn:disabled { opacity:.4; cursor:not-allowed; }
+.mv-refresh-btn svg { width:14px; height:14px; }
+.mv-spin { animation:mvSpin .7s linear infinite; display:block; }
+@keyframes mvSpin { to { transform:rotate(360deg); } }
+
+.mv-toggle-label { display:flex; align-items:center; gap:8px; font-size:12px; color:#737373; cursor:pointer; }
+.mv-toggle { width:38px; height:20px; border-radius:10px; border:none; cursor:pointer; position:relative; transition:background .25s; flex-shrink:0; }
+.mv-toggle.on { background:#7f1d1d; } .mv-toggle.off { background:#2d2d2d; }
+.mv-toggle-knob { position:absolute; top:2px; width:16px; height:16px; background:white; border-radius:50%; transition:left .25s; display:block; }
+.mv-toggle.on .mv-toggle-knob { left:20px; } .mv-toggle.off .mv-toggle-knob { left:2px; }
+.mv-interval-input { width:52px; padding:6px 8px; background:#0f0f0f; border:1px solid #2d2d2d; border-radius:6px; color:#e5e5e5; font-size:13px; font-family:inherit; text-align:center; }
+.mv-interval-input:focus { outline:none; border-color:#7f1d1d; }
+.mv-interval-input:disabled { opacity:.4; }
+.mv-unit { font-size:12px; color:#555; }
+
+/* Pills */
+.mv-pill { display:inline-flex; align-items:center; gap:5px; padding:3px 10px; border-radius:20px; font-size:11px; font-weight:600; white-space:nowrap; }
+.pill-online    { background:rgba(16,185,129,.12); color:#10b981; border:1px solid rgba(16,185,129,.25); }
+.pill-searching { background:rgba(245,158,11,.12); color:#f59e0b; border:1px solid rgba(245,158,11,.25); }
+.pill-time      { background:#1e1e1e; color:#555; border:1px solid #2d2d2d; }
+.mv-pill-dot { width:6px; height:6px; border-radius:50%; background:currentColor; animation:mvBlink 1.8s ease-in-out infinite; }
+@keyframes mvBlink { 0%,100%{opacity:1} 50%{opacity:.3} }
+
+/* Error */
+.mv-error { display:flex; align-items:center; gap:10px; padding:9px 20px; background:rgba(239,68,68,.08); border-bottom:1px solid rgba(239,68,68,.2); color:#fca5a5; font-size:13px; flex-shrink:0; }
+.mv-error svg { width:15px; height:15px; flex-shrink:0; }
+.mv-error-close { margin-left:auto; background:none; border:none; color:#fca5a5; cursor:pointer; }
+
+/* Body */
+.mv-body { display:flex; flex:1; overflow:hidden; }
+.mv-map-area { flex:1; display:flex; flex-direction:column; overflow:hidden; }
+.mv-map-wrap { flex:1; position:relative; overflow:hidden; }
+.mv-map-wrap > div { height:100% !important; }
+
+/* Info strip */
+.mv-info-strip { display:flex; align-items:center; flex-wrap:wrap; padding:10px 20px; background:#1a1a1a; border-top:1px solid #2d2d2d; flex-shrink:0; }
+.mv-info-item { display:flex; flex-direction:column; gap:2px; padding:0 16px; }
+.mv-info-item:first-child { padding-left:0; }
+.mv-info-sep { width:1px; height:30px; background:#2d2d2d; flex-shrink:0; }
+.mv-info-label { font-size:10px; font-weight:700; text-transform:uppercase; letter-spacing:.06em; color:#555; }
+.mv-info-val { font-size:12.5px; color:#e5e5e5; font-weight:500; }
+.mv-info-val.mono { font-family:'JetBrains Mono',monospace; }

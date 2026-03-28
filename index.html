@@ -1,0 +1,162 @@
+
+
+    
+    <!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+    <title>CityTag Last Location</title>
+    <script src='https://api.mapbox.com/mapbox-gl-js/v3.3.0/mapbox-gl.js'></script>
+    <link href='https://api.mapbox.com/mapbox-gl-js/v3.3.0/mapbox-gl.css' rel='stylesheet' />
+    <style>
+        body { margin:0; padding:0; font-family: Arial, sans-serif; }
+        #map { height: calc(100vh - 80px); }
+        #controls {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            z-index: 999;
+            background: white;
+            padding: 12px 16px;
+            border-radius: 6px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.3);
+        }
+        button {
+            padding: 8px 16px;
+            background: #1e88e5;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+        button:hover { background: #1565c0; }
+        #status {
+            margin-top: 10px;
+            font-size: 13px;
+            min-width: 240px;
+        }
+    </style>
+</head>
+<body>
+
+<div id="controls">
+    <button id="refresh">Refresh Last Location</button>
+    <div id="status">Waiting for data...</div>
+</div>
+
+<div id="map"></div>
+
+<script>
+// ────────────────────────────────────────────────
+const BACKEND_URL = 'http://localhost:3000/latest-location';
+mapboxgl.accessToken = import.meta.env.VITE_MAPBOX_TOKEN;
+let map;
+let marker = null;
+const status = document.getElementById('status');
+
+function setStatus(text, isError = false) {
+    status.textContent = text;
+    status.style.color = isError ? 'red' : '#006600';
+    console.log('[FRONTEND]', text);
+}
+
+function isValidCoordinate(num) {
+    return typeof num === 'number' && !isNaN(num) && Math.abs(num) <= 180;
+}
+
+async function loadLatestLocation() {
+    setStatus('Loading last location...');
+
+    try {
+        console.log('[FRONTEND] Fetching:', BACKEND_URL);
+        const res = await fetch(BACKEND_URL);
+        
+        if (!res.ok) {
+            throw new Error(`Backend HTTP ${res.status}`);
+        }
+
+        const data = await res.json();
+        console.log('[FRONTEND] Full response:', data);
+
+        if (!data.success) {
+            throw new Error(data.error || 'Backend error');
+        }
+
+        if (!data.latest) {
+            setStatus('No location data available yet', true);
+            return;
+        }
+
+        const lat = parseFloat(data.latest.latitude);
+        const lng = parseFloat(data.latest.longitude);
+
+        console.log('[FRONTEND] Parsed coordinates → lat:', lat, 'lng:', lng);
+
+        if (!isValidCoordinate(lat) || !isValidCoordinate(lng)) {
+            throw new Error('Invalid latitude/longitude received');
+        }
+
+        setStatus(`Last update: ${data.latest.timestamp} • Battery: ${data.latest.batteryLevel}%`);
+
+        // Create or update marker
+        const position = [lng, lat];  // VERY IMPORTANT: Mapbox uses [lng, lat]
+
+        if (marker) {
+            marker.setLngLat(position);
+        } else {
+            marker = new mapboxgl.Marker({
+                color: '#00c853',
+                scale: 1.1
+            })
+                .setLngLat(position)
+                .setPopup(new mapboxgl.Popup({ offset: 25 })
+                    .setHTML(`
+                        <div style="min-width: 180px;">
+                            <strong>Last Position</strong><br>
+                            <small>${data.latest.timestamp}</small><br><br>
+                            Battery: ${data.latest.batteryLevel}%<br>
+                            Accuracy: ${data.latest.accuracy}m<br>
+                            Confidence: ${data.latest.confidence}
+                        </div>
+                    `))
+                .addTo(map);
+        }
+
+        // Move map to the location
+        map.flyTo({
+            center: position,
+            zoom: 15.8,
+            essential: true,
+            duration: 1200
+        });
+
+    } catch (err) {
+        console.error('[FRONTEND] Error:', err.message);
+        setStatus(`Error: ${err.message}`, true);
+    }
+}
+
+// Initialize map
+map = new mapboxgl.Map({
+    container: 'map',
+    style: 'mapbox://styles/mapbox/streets-v12',
+    center: [67.0, 24.8],  // reasonable fallback for Pakistan
+    zoom: 10
+});
+
+map.on('load', () => {
+    console.log('[FRONTEND] Map fully loaded');
+    setStatus('Map ready → fetching location...');
+    loadLatestLocation();
+});
+
+// Refresh button
+document.getElementById('refresh').addEventListener('click', () => {
+    console.log('[FRONTEND] Manual refresh clicked');
+    loadLatestLocation();
+});
+
+</script>
+</body>
+</html>

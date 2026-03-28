@@ -1,0 +1,21 @@
+
+File    : CardTagReadings_Final.xlsx
+Sheets  : ['STP3', 'STP4', 'STP5', 'STP6', 'STP7', 'STP8', 'STP9', 'STP10', 'STP11', 'STP12']
+UID     : 251799
+MongoDB : mongodb+srv://sheikhabdulbaseer786:G1342s%40g@cluster0.hiywggw.mongodb.net/citytag_dashboard?retryWrites=true&w=majority  db=citytag_development  col=locations
+
+  CARD-STP3    372 points
+  CARD-STP4    648 points
+  CARD-STP5    274 points
+  CARD-STP6    269 points
+  CARD-STP7    216 points
+  CARD-STP8    300 points
+  CARD-STP9    348 points
+  CARD-STP10   175 points
+  CARD-STP11   117 points
+  CARD-STP12   74 points
+
+Total   : 2793 documents prepared
+
+Dry run — pass --apply to write to MongoDB
+
