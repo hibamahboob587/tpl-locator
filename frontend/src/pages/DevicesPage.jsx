@@ -31,7 +31,7 @@ const SELECT_OPTION_STYLE = { background: "#27272a", color: "#f4f4f5" };
 const HomePage = () => {
   const { isAdmin } = useAuth();
   const {
-    bindDevice, unbindDevice, adminUnbindDevice,
+    bindDevice, unbindDevice,
     adminCreateUser, adminAssignDeviceToUser, adminUpdateDevice,
   } = useCityTag();
 
@@ -120,7 +120,7 @@ const HomePage = () => {
   // ── Unbind ─────────────────────────────────────────────────────────────────
   const handleUnbind = async (sn) => {
     if (!window.confirm(`Remove binding for ${sn}?`)) return;
-    try { await adminUnbindDevice(sn); refreshDevices(); refreshUsers(); }
+    try { await unbindDevice(sn); refreshDevices(); refreshUsers(); }
     catch (err) { setError(err.message || "Failed to unbind"); }
   };
 

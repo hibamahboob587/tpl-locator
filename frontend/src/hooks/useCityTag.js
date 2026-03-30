@@ -79,7 +79,7 @@ export function useCityTag() {
   );
 
   const adminUnbindDevice = useCallback(
-    async (sn) => apiFetch(`/api/admin/devices/${encodeURIComponent(sn)}/unassign`, { method: "DELETE" }, accessToken),
+    async (sn) => apiFetch(`/api/devices/${encodeURIComponent(sn)}`, { method: "DELETE" }, accessToken),
     [accessToken]
   );
 
