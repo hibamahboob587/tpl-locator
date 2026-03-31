@@ -34,7 +34,7 @@ async function apiFetch(path, { method = "GET", body } = {}, accessToken) {
 }
 
 export function useCityTag() {
-  const { accessToken, isAdmin } = useAuth();
+  const { accessToken } = useAuth();
 
   const login = useCallback(
     async ({ email, password }) =>
@@ -52,8 +52,8 @@ export function useCityTag() {
   );
 
   const getDevices = useCallback(
-    async () => apiFetch(isAdmin ? "/api/admin/devices" : "/api/devices", {}, accessToken),
-    [accessToken, isAdmin]
+    async () => apiFetch("/api/devices", {}, accessToken),
+    [accessToken]
   );
 
   // User bind — hits /api/devices (user endpoint)

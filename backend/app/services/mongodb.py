@@ -2,6 +2,8 @@ from typing import Optional, List
 from datetime import datetime, timezone, timedelta
 from motor.motor_asyncio import AsyncIOMotorClient, AsyncIOMotorDatabase
 from bson import ObjectId
+import logging
+import certifi
 
 from app.auth_utils import hash_password
 from app.models.admin import AdminInDB, AdminCreate
@@ -14,11 +16,16 @@ import os
 # choose database name via environment, default to development db
 MONGO_DB_NAME = os.getenv("MONGO_DB_NAME", "citytag_development")
 ADMINS_COLLECTION = "admins"
+logger = logging.getLogger(__name__)
 
 
 class MongoService:
     def __init__(self, uri: str):
-        self._client = AsyncIOMotorClient(uri)
+        self._client = AsyncIOMotorClient(
+            uri,
+            tls=True,
+            tlsCAFile=certifi.where()
+        )
 
     @property
     def client(self) -> AsyncIOMotorClient:
@@ -222,6 +229,98 @@ class MongoService:
         )
 
         return bool(result.upserted_id or result.modified_count > 0)
+
+    async def upsert_device_from_citytag(
+        self,
+        *,
+        admin_id: str,
+        citytag_device: dict,
+    ) -> None:
+        """
+        Persist CityTag device metadata into Mongo so /api/devices can be Mongo-backed only.
+
+        We intentionally DO NOT overwrite binding fields controlled by our own APIs:
+        - user_id
+        - bound_at
+        """
+        try:
+            sn = citytag_device.get("sn") or citytag_device.get("deviceSn") or citytag_device.get("deviceSN") \
+                or citytag_device.get("serial") or citytag_device.get("serialNumber") \
+                or citytag_device.get("imei") or citytag_device.get("device_no") \
+                or citytag_device.get("deviceNo")
+            if not sn:
+                return
+            sn = str(sn)
+
+            existing = await self.devices.find_one({"sn": sn})
+            is_bound = bool(existing and existing.get("user_id"))
+
+            label = (
+                citytag_device.get("assigned_name")
+                or citytag_device.get("name")
+                or citytag_device.get("deviceName")
+                or sn
+            )
+
+            fields: dict = {}
+
+            # Always store some raw metadata when present (safe, non-binding).
+            if citytag_device.get("mac") is not None:
+                fields["mac"] = citytag_device.get("mac")
+            if label:
+                # Used by the frontend when `name` is empty/stale.
+                fields["assigned_name"] = label
+            if citytag_device.get("client") is not None:
+                # Only stamp client for unbound devices; binding operations control it for bound devices.
+                if not is_bound and not (existing and existing.get("client")):
+                    fields["client"] = citytag_device.get("client")
+            local_only_val = citytag_device.get("local_only")
+            if local_only_val is None:
+                local_only_val = citytag_device.get("localOnly")
+            if local_only_val is not None:
+                fields["local_only"] = bool(local_only_val)
+
+            datapoint_val = citytag_device.get("datapoint_count")
+            if datapoint_val is None:
+                datapoint_val = citytag_device.get("datapointCount")
+            if datapoint_val is not None:
+                fields["datapoint_count"] = datapoint_val
+
+            last_seen_val = citytag_device.get("last_seen")
+            if last_seen_val is None:
+                last_seen_val = citytag_device.get("lastSeen")
+            if last_seen_val is not None:
+                fields["last_seen"] = last_seen_val
+
+            first_seen_val = citytag_device.get("first_seen")
+            if first_seen_val is None:
+                first_seen_val = citytag_device.get("firstSeen")
+            if first_seen_val is not None:
+                fields["first_seen"] = first_seen_val
+            if citytag_device.get("region") is not None and not is_bound:
+                # Region is editable by admin; only set for unbound devices to reduce surprise.
+                fields["region"] = citytag_device.get("region")
+
+            # For unbound devices, keep Mongo "name" aligned with CityTag label so admin tables look good.
+            if not is_bound:
+                if not existing or not existing.get("name"):
+                    fields["name"] = label
+
+            # Ensure admin_id exists on the device doc.
+            admin_oid = ObjectId(admin_id) if admin_id else None
+            if admin_oid and (not existing or not existing.get("admin_id")):
+                fields["admin_id"] = admin_oid
+
+            if not existing:
+                # Create base doc first so _id exists for local_id display.
+                await self.create_device(sn, admin_id, name=(label if label else sn))
+
+            if fields:
+                await self.devices.update_one({"sn": sn}, {"$set": fields}, upsert=False)
+        except Exception:
+            # Keep sync resilient: ignore per-device metadata issues, but log for debugging.
+            logger.exception("upsert_device_from_citytag failed admin_id=%s", admin_id)
+            return
 
     def _parse_citytag_timestamp(self, value) -> datetime:
         """

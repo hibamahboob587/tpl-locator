@@ -2,12 +2,12 @@ from fastapi import APIRouter, Depends, HTTPException, status
 import logging
 from typing import Annotated
 from datetime import datetime, timedelta
-from httpx import HTTPStatusError
+import asyncio
+from httpx import HTTPStatusError, ConnectTimeout, RequestError
 
 from app.dependencies import get_citytag_client, get_mongo_service
 from app.services.citytag import CityTagClient, CityTagError
 from app.services.mongodb import MongoService
-from app.routers.auth import login, LoginRequest
 
 
 router = APIRouter(prefix="/api", tags=["sync"])
@@ -25,23 +25,21 @@ async def try_relogin(email: str, uid: str, mongo: MongoService, citytag: CityTa
     logger.info("sync try_relogin started email=%s uid=%s", email, uid)
 
     try:
-
-        payload = LoginRequest(
-            email=email,
-            password=CITYTAG_PASSWORD,
-            uid=uid
-        )
-
-        await login(payload=payload, mongo=mongo, citytag=citytag)
+        # CityTag login is done inside sync to prevent CityTag outages from affecting end-user endpoints.
+        token_response = await citytag.login(username=email, password=CITYTAG_PASSWORD)
+        token = token_response.get("token") if isinstance(token_response, dict) else None
+        if not token:
+            logger.warning("sync try_relogin token_missing email=%s", email)
+            return None
 
         admin_doc = await mongo.admins.find_one({"email": email})
+        if not admin_doc:
+            logger.warning("sync try_relogin admin_missing email=%s", email)
+            return None
 
-        if admin_doc and admin_doc.get("citytag_token"):
-            logger.info("sync try_relogin success email=%s", email)
-            return admin_doc["citytag_token"]
-
-        logger.warning("sync try_relogin token_missing email=%s", email)
-        return None
+        await mongo.update_admin_token(str(admin_doc["_id"]), token)
+        logger.info("sync try_relogin success email=%s", email)
+        return token
 
     except Exception as exc:
 
@@ -54,34 +52,73 @@ async def try_relogin(email: str, uid: str, mongo: MongoService, citytag: CityTa
 # -----------------------------------------------------
 
 async def get_devices(citytag: CityTagClient, uid: str, token: str, email: str):
+    """
+    Fetch devices from CityTag with retry + token-error signalling.
 
-    try:
+    Returns:
+      list      — on success (possibly empty)
+      []        — on non-token errors (including repeated timeouts)
+      None      — when the token is considered invalid/expired
+    """
+    max_retries = 3
+    base_delay_seconds = 2
 
-        devices = await citytag.get_devices(uid=uid, token=token)
+    for attempt in range(1, max_retries + 1):
+        try:
+            devices = await citytag.get_devices(uid=uid, token=token)
+            if attempt > 1:
+                logger.info(
+                    "sync get_devices succeeded after_retry email=%s attempts=%s",
+                    email,
+                    attempt,
+                )
+            return devices
 
-        return devices
+        except (CityTagError, HTTPStatusError) as e:
+            msg = str(e).lower()
 
-    except (CityTagError, HTTPStatusError) as e:
+            # Treat auth/400-style problems as token issues that require relogin.
+            if any(
+                x in msg
+                for x in [
+                    "token",
+                    "expired",
+                    "invalid",
+                    "401",
+                    "unauthorized",
+                    "400",
+                    "bad request",
+                ]
+            ):
+                logger.warning("sync get_devices token_expired email=%s", email)
+                return None
 
-        msg = str(e).lower()
+            logger.error(
+                "sync get_devices failed email=%s attempt=%s/%s error=%s",
+                email,
+                attempt,
+                max_retries,
+                e,
+            )
 
-        if any(
-            x in msg for x in [
-                "token",
-                "expired",
-                "invalid",
-                "401",
-                "unauthorized",
-                "400",
-                "bad request"
-            ]
-        ):
-            logger.warning("sync get_devices token_expired email=%s", email)
-            return None
+        except (ConnectTimeout, RequestError) as e:
+            # Network/timeout errors are transient — retry a few times.
+            logger.warning(
+                "sync get_devices network_error email=%s attempt=%s/%s error=%s",
+                email,
+                attempt,
+                max_retries,
+                e,
+            )
 
-        logger.error("sync get_devices failed email=%s error=%s", email, e)
+        # If we have more attempts left, back off before retrying.
+        if attempt < max_retries:
+            delay = base_delay_seconds * attempt
+            await asyncio.sleep(delay)
 
-        return []
+    # After all retries, give up for this admin in this run but keep sync alive.
+    logger.error("sync get_devices giving_up email=%s retries=%s", email, max_retries)
+    return []
 
 
 # -----------------------------------------------------
@@ -109,6 +146,7 @@ async def sync_all_admin_locations(
 
         email = admin.get("email")
         uid = admin.get("uid")
+        admin_id = str(admin.get("_id")) if admin.get("_id") is not None else None
         token = admin.get("citytag_token")
 
         if not email or not uid:
@@ -144,6 +182,13 @@ async def sync_all_admin_locations(
         total_devices += len(devices)
 
         for device in devices:
+
+            if isinstance(device, dict):
+                # Persist device metadata into Mongo so listing endpoints are CityTag-free.
+                await mongo.upsert_device_from_citytag(
+                    admin_id=admin_id,
+                    citytag_device=device,
+                )
 
             sn = device.get("sn")
 

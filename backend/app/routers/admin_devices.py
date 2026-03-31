@@ -6,10 +6,10 @@ from bson import ObjectId
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel
 
-from app.dependencies import get_citytag_client, get_current_admin, get_mongo_service
+from app.dependencies import get_current_admin, get_mongo_service
 from app.models.admin import AdminInDB
-from app.services.citytag import CityTagClient, CityTagError
 from app.services.mongodb import MongoService
+from app.routers.devices import _enrich_admin_devices
 
 
 router = APIRouter(prefix="/api/admin", tags=["admin_devices"])
@@ -139,119 +139,21 @@ def _resolve_user(raw_user_id, users_by_id: dict) -> tuple[str | None, str | Non
 @router.get("/devices")
 async def list_admin_devices(
     current_admin: Annotated[AdminInDB, Depends(get_current_admin)],
-    citytag: Annotated[CityTagClient, Depends(get_citytag_client)],
     mongo: Annotated[MongoService, Depends(get_mongo_service)],
     sn: str | None = Query(default=None, description="Optional device SN filter"),
 ) -> List[Dict[str, Any]]:
     logger.info("list_admin_devices started admin=%s sn_filter=%s", current_admin.email, sn)
-    token = current_admin.citytag_token
-    if not token:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="CityTag token missing; please login again")
-
     try:
-        devices = await citytag.get_devices(uid=current_admin.uid, token=token)
-        logger.info("list_admin_devices citytag_fetch_success admin=%s count=%s", current_admin.email, len(devices))
-    except CityTagError as exc:
-        logger.warning("list_admin_devices citytag_error admin=%s error=%s", current_admin.email, exc)
-        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=f"CityTag API error: {str(exc)}")
+        result = await _enrich_admin_devices(current_admin, mongo)
     except Exception as exc:
         logger.exception("list_admin_devices failed admin=%s", current_admin.email)
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Internal error: {str(exc)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Internal error: {str(exc)}",
+        )
 
     if sn:
-        devices = [d for d in devices if str(d.get("sn")) == sn]
-
-    # ── Merge local-only devices ──────────────────────────────────────────────
-    try:
-        admin_oid = _to_oid(current_admin.id)
-        query = (
-            {"$or": [{"admin_id": admin_oid}, {"uid": str(current_admin.uid)}]}
-            if admin_oid else {"uid": str(current_admin.uid)}
-        )
-        local_devices = await mongo.devices.find(query).to_list(None)
-        existing_sns  = {str(d.get("sn")) for d in devices}
-
-        for local_device in local_devices:
-            device_sn = str(local_device.get("sn"))
-            if device_sn not in existing_sns:
-                # Mark for enrichment — data filled in bulk step below
-                devices.append({"sn": device_sn, "_pending_local": True})
-                existing_sns.add(device_sn)
-
-        logger.info("list_admin_devices merge_completed admin=%s count=%s", current_admin.email, len(devices))
-    except Exception as err:
-        logger.exception("list_admin_devices merge_failed admin=%s", current_admin.email)
-
-    # ── Bulk-prefetch everything in 3 queries ─────────────────────────────────
-    all_sns = [str(d.get("sn")) for d in devices if d.get("sn")]
-    local_by_sn, latest_by_sn, users_by_id = await _bulk_prefetch(mongo, all_sns)
-    logger.info(
-        "list_admin_devices prefetched admin=%s local=%s locations=%s users=%s",
-        current_admin.email,
-        len(local_by_sn),
-        len(latest_by_sn),
-        len(users_by_id),
-    )
-
-    # ── Enrich from memory — no more DB calls in this loop ────────────────────
-    result = []
-    for d in devices:
-        device_sn = str(d.get("sn", ""))
-        try:
-            raw_doc    = local_by_sn.get(device_sn)
-            latest_loc = latest_by_sn.get(device_sn)
-            latest_ts  = latest_loc.get("timestamp") if latest_loc else None
-
-            raw_user_id         = raw_doc.get("user_id") if raw_doc else None
-            uid_str, user_name  = _resolve_user(raw_user_id, users_by_id)
-
-            if d.get("_pending_local") or d.get("local_only"):
-                result.append({
-                    "sn":                 device_sn,
-                    "local_id":           str(raw_doc["_id"]) if raw_doc else None,
-                    "assigned_user_id":   uid_str,
-                    "assigned_user_name": user_name,
-                    "assigned_name":      (raw_doc.get("name") or device_sn) if raw_doc else device_sn,
-                    "client":             (raw_doc.get("client") or None) if raw_doc else None,
-                    "status":             _get_device_status(latest_ts),
-                    "local_only":         True,
-                    "datapoint_count":    (raw_doc.get("datapoint_count", 0)) if raw_doc else 0,
-                    "last_seen":          (raw_doc.get("last_seen")) if raw_doc else None,
-                    "first_seen":         (raw_doc.get("first_seen")) if raw_doc else None,
-                    "dataRetrievalTime":  _fmt_dt(latest_ts or (raw_doc.get("last_seen") if raw_doc else None)),
-                    "bindTime":           _fmt_dt(raw_doc.get("bound_at") if raw_doc else None),
-                })
-                continue
-
-            # CityTag device — enrich with local data
-            if raw_doc:
-                d["local_id"] = str(raw_doc["_id"])
-                d["bindTime"] = _fmt_dt(raw_doc.get("bound_at"))
-                d["client"]   = raw_doc.get("client") or None
-            else:
-                d["bindTime"] = None
-                d["client"]   = None
-
-            d["assigned_user_id"]   = uid_str
-            d["assigned_user_name"] = user_name
-            if not uid_str:
-                d["assigned_name"] = None
-
-            citytag_last_seen = d.get("last_seen") or d.get("lastSeen") or d.get("gpstime")
-            if citytag_last_seen:
-                d["dataRetrievalTime"] = _fmt_dt(citytag_last_seen)
-                d["status"] = _get_device_status(citytag_last_seen)
-            elif latest_ts:
-                d["dataRetrievalTime"] = _fmt_dt(latest_ts)
-                d["status"] = _get_device_status(latest_ts)
-            else:
-                d["status"] = "offline"
-
-            result.append(d)
-
-        except Exception as err:
-            logger.exception("list_admin_devices enrich_failed admin=%s sn=%s", current_admin.email, device_sn)
-            result.append(d)
+        result = [d for d in result if str(d.get("sn")) == sn]
 
     logger.info("list_admin_devices completed admin=%s result_count=%s", current_admin.email, len(result))
     return result
@@ -262,18 +164,8 @@ async def search_device_for_binding(
     sn: str,
     current_admin: Annotated[AdminInDB, Depends(get_current_admin)],
     mongo: Annotated[MongoService, Depends(get_mongo_service)],
-    citytag: Annotated[CityTagClient, Depends(get_citytag_client)],
 ):
     logger.info("search_device_for_binding started admin=%s sn=%s", current_admin.email, sn)
-    try:
-        citytag_devices = await citytag.get_devices(uid=current_admin.uid, token=current_admin.citytag_token)
-        citytag_device = next((d for d in citytag_devices if str(d.get("sn")) == sn), None)
-        if citytag_device:
-            logger.info("search_device_for_binding found_in_citytag admin=%s sn=%s", current_admin.email, sn)
-            return {"found": True, "source": "citytag", "device": citytag_device}
-    except Exception as err:
-        logger.warning("search_device_for_binding citytag_error admin=%s sn=%s error=%s", current_admin.email, sn, err)
-
     try:
         local_device = await mongo.devices.find_one({"sn": sn})
         if local_device:

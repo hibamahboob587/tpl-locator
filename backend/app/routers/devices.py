@@ -10,6 +10,7 @@ from app.models.admin import AdminInDB
 from app.models.user import UserInDB
 from app.services.mongodb import MongoService
 from app.services.device_binding import bind_device_service, unbind_device_service
+from bson import ObjectId
 
 
 router = APIRouter(prefix="/api", tags=["devices"])
@@ -66,20 +67,139 @@ async def _enrich_device(doc: dict, user: UserInDB, mongo: MongoService) -> dict
     # fall back to the user's account name or email
     assigned_user_name = doc.get("name") or user.name or user.email or None
 
+    # assigned_name — label used by the UI when `name` is empty.
+    assigned_name = doc.get("assigned_name") or doc.get("name") or device_sn
+
     # client — stored on the device doc at bind time
     client = doc.get("client") or None
 
     return {
         "sn":                 device_sn,
         "name":               doc.get("name", ""),
+        "assigned_name":     assigned_name,
         "client":             client,
         "status":             device_status,
         "assigned_user_name": assigned_user_name,
         "assigned_user_id":   str(user.id),
+        # Frontend legacy alias (used by dashboard pages).
+        "assignedUser":      assigned_user_name,
         "dataRetrievalTime":  data_retrieval_time,
         "bindTime":           _fmt_dt(doc.get("bound_at")),
         "local_id":           str(doc.get("_id")),
     }
+
+
+def _to_oid(value) -> ObjectId | None:
+    if value is None:
+        return None
+    if isinstance(value, ObjectId):
+        return value
+    try:
+        return ObjectId(str(value))
+    except Exception:
+        return None
+
+
+async def _enrich_admin_devices(admin: AdminInDB, mongo: MongoService) -> List[dict]:
+    """
+    Build an admin-facing device list purely from Mongo.
+
+    This keeps GET /api/devices stable even if CityTag is down, because it only relies on:
+    - mongo.devices (binding/name/client/region/user assignment)
+    - mongo.locations (latest timestamp -> status + dataRetrievalTime)
+    - mongo.users (assigned user display name)
+    """
+    logger.info("enrich_admin_devices started admin=%s", admin.email)
+
+    docs = await mongo.devices.find({"admin_id": admin.id}).to_list(None)
+    if not docs:
+        return []
+
+    sns = [str(d.get("sn")) for d in docs if d.get("sn")]
+    sns_set = set(sns)
+
+    # Latest location per SN via aggregation to avoid N+1 queries
+    latest_by_sn: dict[str, dict] = {}
+    if sns_set:
+        pipeline = [
+            {"$match": {"sn": {"$in": list(sns_set)}}},
+            {"$sort": {"timestamp": -1}},
+            {"$group": {"_id": "$sn", "timestamp": {"$first": "$timestamp"}}},
+        ]
+        async for row in mongo.locations.aggregate(pipeline):
+            latest_by_sn[str(row["_id"])] = {"timestamp": row.get("timestamp")}
+
+    # Prefetch users referenced by device.user_id
+    user_oids: list[ObjectId] = []
+    for d in docs:
+        oid = _to_oid(d.get("user_id"))
+        if oid:
+            user_oids.append(oid)
+    user_oids = list({str(o): o for o in user_oids}.values())  # de-dupe preserving values
+
+    users_by_id: dict[str, dict] = {}
+    if user_oids:
+        async for user_doc in mongo.users.find({"_id": {"$in": user_oids}}):
+            users_by_id[str(user_doc["_id"])] = user_doc
+
+    def resolve_user_display(user_oid) -> tuple[str | None, str | None]:
+        oid = _to_oid(user_oid)
+        if not oid:
+            return None, None
+        user_doc = users_by_id.get(str(oid))
+        if not user_doc:
+            return str(oid), None
+        name = (user_doc.get("name") or "").strip()
+        email = user_doc.get("email") or ""
+        display = name or (email.split("@")[0] if "@" in email else email) or None
+        return str(oid), display
+
+    result: list[dict] = []
+    for doc in docs:
+        device_sn = doc.get("sn")
+        if not device_sn:
+            continue
+
+        latest_ts = latest_by_sn.get(str(device_sn), {}).get("timestamp") if latest_by_sn else None
+        data_retrieval_time = _fmt_dt(latest_ts) if latest_ts else None
+        device_status = _get_device_status(latest_ts) if latest_ts else "offline"
+
+        assigned_user_id, assigned_user_name = resolve_user_display(doc.get("user_id"))
+
+        # DevicesTable expects these keys for sorting/filtering/rendering.
+        # Keep `name` faithful to Mongo (it can legitimately be empty), so `assigned_name`
+        # can still be displayed by the frontend when `name` is stale/blank.
+        device_name = doc.get("name", "") or ""
+        assigned_name = (
+            doc.get("assigned_name")
+            or (device_name if device_name and device_name != device_sn else None)
+            or device_sn
+        )
+
+        result.append({
+            "sn": device_sn,
+            "local_id": str(doc.get("_id")),
+            "name": device_name,
+            "assigned_name": assigned_name,
+            "client": doc.get("client") or None,
+            "status": device_status,
+            "assigned_user_name": assigned_user_name,
+            "assigned_user_id": assigned_user_id,
+            # Frontend legacy alias (used by dashboard pages).
+            "assignedUser": assigned_user_name,
+            "dataRetrievalTime": data_retrieval_time,
+            "bindTime": _fmt_dt(doc.get("bound_at")),
+            "region": doc.get("region") or None,
+
+            # Optional legacy fields that old admin enrichment included.
+            "local_only": bool(doc.get("local_only")) if doc.get("local_only") is not None else None,
+            "datapoint_count": doc.get("datapoint_count", 0),
+            "last_seen": doc.get("last_seen") or doc.get("lastSeen") or None,
+            "first_seen": doc.get("first_seen") or None,
+        })
+
+    logger.info("enrich_admin_devices completed admin=%s result_count=%s", admin.email, len(result))
+    return result
 
 
 @router.get("/devices")
@@ -90,7 +210,7 @@ async def list_user_devices(
     """
     Return devices for the logged-in account.
     - User: only their assigned devices, fully enriched for DevicesTable.
-    - Admin: basic list (admin should use /api/admin/devices instead).
+    - Admin: enriched list for DevicesTable (Mongo-backed; no CityTag calls).
     """
     logger.info("list_user_devices started account_email=%s", account.email)
     if isinstance(account, UserInDB):
@@ -105,10 +225,10 @@ async def list_user_devices(
         logger.info("list_user_devices completed account_email=%s count=%s", account.email, len(result))
         return result
 
-    # Admin path — basic list only
-    docs = await mongo.devices.find({"admin_id": account.id}).to_list(None)
-    logger.info("list_user_devices completed admin_email=%s count=%s", account.email, len(docs))
-    return [{"id": str(d.get("_id")), "sn": d.get("sn"), "name": d.get("name")} for d in docs]
+    # Admin path — enriched list for the admin's devices
+    result = await _enrich_admin_devices(account, mongo)
+    logger.info("list_user_devices completed admin_email=%s count=%s", account.email, len(result))
+    return result
 
 
 class BindDeviceRequest(BaseModel):
