@@ -15,7 +15,6 @@ export default function LoginForm() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
-  const [uid, setUid] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
@@ -26,7 +25,6 @@ export default function LoginForm() {
   const canSubmit = (() => {
     if (loading) return false;
     if (!email.trim() || !password) return false;
-    if (isAdmin && !uid.trim()) return false;
     if (isSignup && (!name.trim() || !confirmPassword || password !== confirmPassword)) return false;
     return true;
   })();
@@ -35,7 +33,6 @@ export default function LoginForm() {
     setMode(newMode);
     setError("");
     setConfirmPassword("");
-    if (newMode !== MODE.ADMIN_LOGIN) setUid("");
   }
 
   async function onSubmit(e) {
@@ -65,7 +62,6 @@ export default function LoginForm() {
         const res = await adminLogin({
           email: email.trim(),
           password,
-          uid: uid.trim(),
         });
         loginSuccess({
           user: res.admin ?? res.user ?? null,
@@ -244,22 +240,7 @@ export default function LoginForm() {
           </div>
         )}
 
-        {/* UID (admin only) */}
-        {isAdmin && (
-          <div>
-            <label className="block text-sm font-medium text-white">
-              UID <span className="text-red-500">*</span>
-            </label>
-            <input
-              className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-slate-900/10 bg-white text-slate-900"
-              value={uid}
-              onChange={(e) => setUid(e.target.value)}
-              type="text"
-              inputMode="numeric"
-              required
-            />
-          </div>
-        )}
+
 
         {/* Error */}
         {error && (

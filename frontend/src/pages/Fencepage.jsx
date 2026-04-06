@@ -30,8 +30,7 @@ import { useMapTheme } from "../context/MapThemeContext.jsx";
 import "./FencePage.css";
 
 const MAPBOX_TOKEN =
-  import.meta.env?.VITE_MAPBOX_TOKEN ||
-  process.env?.REACT_APP_MAPBOX_TOKEN || "";
+  import.meta.env?.VITE_MAPBOX_TOKEN || "";
 
 if (!MAPBOX_TOKEN) console.warn("Add VITE_MAPBOX_TOKEN to your .env file.");
 

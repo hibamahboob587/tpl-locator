@@ -13,6 +13,8 @@ class DeviceInDB(BaseModel):
     admin_id: Optional[PyObjectId] = None  # Optional to support legacy/test docs without admin_id
     user_id: Optional[PyObjectId] = None
     name: Optional[str] = ""
+    client: Optional[str] = None
+    region: Optional[str] = None
     bound_at: Optional[datetime] = None    # stamped when device is assigned to a user
     created_at: datetime = Field(default_factory=datetime.utcnow)
 
