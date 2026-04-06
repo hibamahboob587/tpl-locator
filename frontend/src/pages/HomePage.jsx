@@ -2,6 +2,8 @@ import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import './HomePage.css';
 import { useCityTag } from '../hooks/useCityTag.js';
 import { parseKMLText, pointInArea } from '../utils/geofenceUtils.js';
+import { useNavigate } from "react-router-dom";
+import AreaSelector from '../components/AreaSelector.jsx';
 
 // ══════════════════════════════════════════════════════════════════════
 // CONSTANTS & UTILITIES
@@ -102,29 +104,41 @@ function LiveClock({ isHistorical, selectedDate }) {
   );
 }
 
-function FilterBar({ filters, onChange }) {
+function FilterBar({ filters, onChange, kmlAreas, kmlLoading }) {
   const isHistorical = filters.date !== todayStr();
+
   return (
     <div className="hp-filter-bar">
-      <div className="hp-filter-group">
-        <label className="hp-filter-label">Region</label>
-        <select className="hp-filter-select" value={filters.region}
-          onChange={e => onChange({ ...filters, region: e.target.value, area: 'all' })}>
-          <option value="all">All Regions</option>
-          {KML_REGIONS.map(r => <option key={r.value} value={r.value}>{r.label}</option>)}
-        </select>
+      
+      {/* ✅ WRAPPER FIX (CRITICAL) */}
+      <div className="area-selector-wrapper">
+        <AreaSelector
+          value={filters.area}
+          onChange={area => onChange({ ...filters, area })}
+          areas={kmlAreas}
+          loading={kmlLoading}
+        />
       </div>
+
       <div className="hp-filter-group">
         <label className="hp-filter-label">
           Date {isHistorical && <span className="hp-filter-hist-badge">Historical</span>}
         </label>
-        <input type="date" className="hp-filter-select hp-filter-date"
-          value={filters.date} max={todayStr()}
+        <input
+          type="date"
+          className="hp-filter-select hp-filter-date"
+          value={filters.date}
+          max={todayStr()}
           onClick={e => { try { e.target.showPicker(); } catch {} }}
-          onChange={e => onChange({ ...filters, date: e.target.value })} />
+          onChange={e => onChange({ ...filters, date: e.target.value })}
+        />
       </div>
+
       {isHistorical && (
-        <button className="hp-filter-live-btn" onClick={() => onChange({ ...filters, date: todayStr() })}>
+        <button
+          className="hp-filter-live-btn"
+          onClick={() => onChange({ ...filters, date: todayStr() })}
+        >
           ● Back to Live
         </button>
       )}
@@ -148,11 +162,11 @@ function StatCard({ title, value, icon, iconBg, iconColor, accentColor, loading,
           }
           {!loading && rate != null && (
             <div style={{
-              fontSize: 9, fontFamily: "'JetBrains Mono',monospace",
-              color: rate > 0 ? '#4ade80' : 'var(--text-dim)',
+              fontSize: 11, fontFamily: "'JetBrains Mono',monospace",
+              color: rate > 0 ? '#4ade80' : '#d1d5db',
               marginTop: 3, display: 'flex', alignItems: 'center', gap: 3,
             }}>
-              <span style={{ fontSize: 8 }}>{rate > 0 ? '▲' : '—'}</span>
+              <span style={{ fontSize: 10 }}>{rate > 0 ? '▲' : '—'}</span>
               {rate > 0 ? `+${rate} this week` : '0 this week'}
             </div>
           )}
@@ -319,7 +333,7 @@ function UserDevicePanel({ devices }) {
   const CX = 85, CY = 85;
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', minWidth: 0, flex: '1 1 320px', maxWidth: 500 }}>
+    <div className="hp-card" style={{ display: 'flex', flexDirection: 'column', minWidth: 0, flex: '1 1 320px', maxWidth: 500 }}>
       <div className="hp-card-header">
         <span className="hp-card-title">Users / Department &amp; Devices</span>
         <span style={{ fontSize: 9, color: 'var(--text-muted)', fontFamily: "'JetBrains Mono',monospace" }}>
@@ -408,101 +422,59 @@ function UserDevicePanel({ devices }) {
 }
 
 // ══════════════════════════════════════════════════════════════════════
-// REGISTRATIONS DONUT — compact pie, each slice = one month
+// BOUND DEVICES CHART — SVG line chart, one point per month
 // Source: devices[].bindTime — no extra API call
-// ══════════════════════════════════════════════════════════════════════
-function RegistrationsDonut({ devices, selectedDate }) {
+function BoundDevicesChart({ devices, selectedDate }) {
   const [hovered, setHovered] = useState(null);
 
-  const COLORS = [
-    '#6366f1','#f43f5e','#f97316','#facc15',
-    '#4ade80','#22d3ee','#e879f9','#60a5fa',
-  ];
-
-  const { slices, total } = useMemo(() => {
-    // Use the selected date as reference so historical views show the right months
-    const now = selectedDate ? new Date(selectedDate + 'T00:00:00') : new Date();
-    const todayStr = new Date().toISOString().slice(0, 10);
-    const isHistorical = selectedDate && selectedDate !== todayStr;
-
-    let months;
-    if (isHistorical) {
-      // Single bucket: only the month of the selected date
-      months = [{
-        key:   `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`,
-        label: now.toLocaleDateString('en-US', { month: 'short', year: '2-digit' }),
+  const { months, total } = useMemo(() => {
+    const now = selectedDate ? new Date(selectedDate + 'T23:59:59') : new Date();
+    const months = [];
+    for (let i = 7; i >= 0; i--) {
+      const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+      months.push({
+        key:   `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`,
+        label: d.toLocaleDateString('en-US', { month: 'short', year: '2-digit' }),
         count: 0,
-        color: COLORS[0],
-      }];
-    } else {
-      // Rolling 8-month window ending at now
-      months = [];
-      for (let i = 7; i >= 0; i--) {
-        const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
-        months.push({
-          key:   `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`,
-          label: d.toLocaleDateString('en-US', { month: 'short', year: '2-digit' }),
-          count: 0,
-          color: COLORS[i % COLORS.length],
-        });
-      }
+      });
     }
-
     const map = Object.fromEntries(months.map(m => [m.key, m]));
     devices.forEach(d => {
-      // Only count devices that are bound (assigned to a user)
       if (!d.assigned_user_id && !d.user_id) return;
       const raw = d.bindTime ?? d.bound_at ?? d.createdAt ?? null;
       if (!raw) return;
       const dt = new Date(raw);
-      if (isNaN(dt)) return;
-      // Don't count binds that happened after the selected date
-      if (dt > now) return;
+      if (isNaN(dt) || dt > now) return;
       const key = `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}`;
       if (map[key]) map[key].count++;
     });
+    const total = months.reduce((s, m) => s + m.count, 0);
+    return { months, total };
+  }, [devices, selectedDate]);
 
-    const active = months.filter(m => m.count > 0);
-    const total  = active.reduce((s, m) => s + m.count, 0);
-    if (total === 0) return { slices: months.map(m => ({ ...m, pct: 0, path: '' })), total: 0 };
+  const W = 260, H = 90, PAD = { top: 10, right: 10, bottom: 22, left: 24 };
+  const innerW = W - PAD.left - PAD.right;
+  const innerH = H - PAD.top - PAD.bottom;
+  const maxCount = Math.max(...months.map(m => m.count), 1);
+  const selectedKey = selectedDate
+    ? selectedDate.slice(0, 7)
+    : new Date().toISOString().slice(0, 7);
 
-    // Build arcs
-    const CX = 65, CY = 65, R = 54, INNER = 34, GAP = 1.8;
-    const toRad = deg => (deg * Math.PI) / 180;
-    let cursor  = -90;
+  const pts = months.map((m, i) => ({
+    ...m,
+    x: PAD.left + (i / (months.length - 1)) * innerW,
+    y: PAD.top + innerH - (m.count / maxCount) * innerH,
+  }));
 
-    const slices = active.map(m => {
-      const deg   = (m.count / total) * (360 - active.length * GAP);
-      const start = cursor;
-      const end   = start + deg;
-      cursor      = end + GAP;
-
-      const large = deg > 180 ? 1 : 0;
-      const x1  = CX + R * Math.cos(toRad(start));
-      const y1  = CY + R * Math.sin(toRad(start));
-      const x2  = CX + R * Math.cos(toRad(end));
-      const y2  = CY + R * Math.sin(toRad(end));
-      const xi1 = CX + INNER * Math.cos(toRad(start));
-      const yi1 = CY + INNER * Math.sin(toRad(start));
-      const xi2 = CX + INNER * Math.cos(toRad(end));
-      const yi2 = CY + INNER * Math.sin(toRad(end));
-
-      return {
-        ...m,
-        pct:  m.count / total,
-        path: `M ${x1} ${y1} A ${R} ${R} 0 ${large} 1 ${x2} ${y2} L ${xi2} ${yi2} A ${INNER} ${INNER} 0 ${large} 0 ${xi1} ${yi1} Z`,
-        CX, CY,
-      };
-    });
-
-    return { slices, total };
-  }, [devices]);
-
-  const hovSlice = hovered ? slices.find(s => s.key === hovered) : null;
-  const CX = 65, CY = 65;
+  const polyline = pts.map(p => `${p.x},${p.y}`).join(' ');
+  const area = [
+    `${pts[0].x},${PAD.top + innerH}`,
+    ...pts.map(p => `${p.x},${p.y}`),
+    `${pts[pts.length - 1].x},${PAD.top + innerH}`,
+  ].join(' ');
 
   return (
-    <div className="hp-donut-bare">
+    <div className="hp-card hp-donut-bare">
       <div className="hp-card-header">
         <span className="hp-card-title">Bound Devices / Month</span>
         <span style={{ fontSize: 9, color: 'var(--text-muted)', fontFamily: "'JetBrains Mono',monospace" }}>
@@ -510,91 +482,71 @@ function RegistrationsDonut({ devices, selectedDate }) {
         </span>
       </div>
 
-      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10, padding: '10px 12px 12px', flex: 1 }}>
-
-        {/* Donut */}
-        <svg width={130} height={130} style={{ flexShrink: 0 }}>
-          {/* bg ring */}
-          <circle cx={CX} cy={CY} r={44} fill="none" stroke="#1f2028" strokeWidth={20} />
-
-          {total === 0 ? (
-            <circle cx={CX} cy={CY} r={44} fill="none"
-              stroke="#2e3040" strokeWidth={20} strokeDasharray="5 4" />
-          ) : slices.map(s => (
-            <path key={s.key} d={s.path}
-              fill={s.color}
-              opacity={hovered === null ? 0.88 : hovered === s.key ? 1 : 0.18}
-              style={{
-                cursor: 'pointer',
-                transition: 'opacity 0.15s, filter 0.15s',
-                filter: hovered === s.key ? `drop-shadow(0 0 5px ${s.color})` : 'none',
-              }}
-              onMouseEnter={() => setHovered(s.key)}
-              onMouseLeave={() => setHovered(null)}
-            />
-          ))}
-
-          {/* Center text */}
-          <text x={CX} y={CY - 5} textAnchor="middle"
-            fontSize={hovSlice ? 11 : 14} fontWeight="700"
-            fill={hovSlice ? hovSlice.color : '#e8eaf0'}
-            fontFamily="'JetBrains Mono',monospace"
-            style={{ transition: 'fill 0.15s' }}>
-            {hovSlice ? hovSlice.count : total || '—'}
-          </text>
-          <text x={CX} y={CY + 8} textAnchor="middle"
-            fontSize={7} fill="#9ca3af" fontFamily="'JetBrains Mono',monospace">
-            {hovSlice ? hovSlice.label : 'devices'}
-          </text>
-        </svg>
-
-        {/* Legend — horizontal wrap below donut */}
-        <div style={{
-          width: '100%', display: 'flex',
-          flexWrap: 'wrap', gap: '4px 10px',
-          justifyContent: 'center',
-          maxHeight: 72, overflowY: 'auto',
-        }}>
-          {slices.map(s => (
-            <div key={s.key}
-              style={{
-                display: 'flex', alignItems: 'center', gap: 6,
-                cursor: 'pointer',
-                opacity: hovered === null ? 1 : hovered === s.key ? 1 : 0.3,
-                transition: 'opacity 0.15s',
-              }}
-              onMouseEnter={() => setHovered(s.key)}
-              onMouseLeave={() => setHovered(null)}
-            >
-              <div style={{
-                width: 8, height: 8, borderRadius: 2, flexShrink: 0,
-                background: s.color,
-                boxShadow: hovered === s.key ? `0 0 6px ${s.color}` : 'none',
-                transition: 'box-shadow 0.15s',
-              }} />
-              <span style={{
-                fontSize: 10, fontFamily: "'JetBrains Mono',monospace",
-                color: 'var(--text)', flex: 1, minWidth: 0,
-                overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-              }}>{s.label}</span>
-              <span style={{
-                fontSize: 9, fontFamily: "'JetBrains Mono',monospace",
-                color: s.color, flexShrink: 0, fontWeight: 700,
-              }}>{s.count}</span>
-            </div>
-          ))}
-          {total === 0 && (
-            <span style={{ fontSize: 10, color: 'var(--text-muted)', fontFamily: "'JetBrains Mono',monospace" }}>
-              No bind dates found
-            </span>
-          )}
-        </div>
+      <div style={{ padding: '8px 12px 10px', flex: 1, display: 'flex', flexDirection: 'column', gap: 6 }}>
+        {total === 0 ? (
+          <span style={{ fontSize: 11, color: 'var(--text-muted)', fontFamily: "'JetBrains Mono',monospace", textAlign: 'center', marginTop: 20 }}>
+            No bind dates found
+          </span>
+        ) : (
+          <svg width={W} height={H} style={{ overflow: 'visible' }}>
+            <polygon points={area} fill="rgba(128,0,0,0.18)" />
+            <polyline points={polyline} fill="none" stroke="#800000" strokeWidth={2} strokeLinejoin="round" />
+            {[0, 0.5, 1].map(frac => {
+              const y = PAD.top + innerH - frac * innerH;
+              return (
+                <g key={frac}>
+                  <line x1={PAD.left} y1={y} x2={PAD.left + innerW} y2={y}
+                    stroke="#2e3040" strokeWidth={1} strokeDasharray="3 3" />
+                  <text x={PAD.left - 3} y={y + 4} textAnchor="end"
+                    fontSize={7} fill="#6b7280" fontFamily="'JetBrains Mono',monospace">
+                    {Math.round(frac * maxCount)}
+                  </text>
+                </g>
+              );
+            })}
+            {pts.map((p, idx) => {
+              const isSelected = p.key === selectedKey;
+              const isHovered  = hovered === p.key;
+              return (
+                <g key={p.key}
+                  onMouseEnter={() => setHovered(p.key)}
+                  onMouseLeave={() => setHovered(null)}
+                  style={{ cursor: 'pointer' }}>
+                  <circle cx={p.x} cy={p.y} r={isHovered ? 6 : 4}
+                    fill={isSelected ? '#f59e0b' : '#800000'}
+                    stroke={isHovered ? '#fff' : 'none'} strokeWidth={1.5}
+                    style={{ transition: 'r 0.1s' }} />
+                  {(idx % 2 === 0 || isSelected) && (
+                    <text x={p.x} y={H - 2} textAnchor="middle"
+                      fontSize={7} fill={isSelected ? '#f59e0b' : '#6b7280'}
+                      fontFamily="'JetBrains Mono',monospace">
+                      {p.label.split(' ')[0]}
+                    </text>
+                  )}
+                  {isHovered && (
+                    <g>
+                      <rect x={p.x - 22} y={p.y - 30} width={44} height={22}
+                        rx={4} fill="#1f2028" stroke="#2e3040" strokeWidth={1} />
+                      <text x={p.x} y={p.y - 18} textAnchor="middle"
+                        fontSize={8} fill="#e8eaf0" fontFamily="'JetBrains Mono',monospace">
+                        {p.label}
+                      </text>
+                      <text x={p.x} y={p.y - 8} textAnchor="middle"
+                        fontSize={9} fill="#f59e0b" fontWeight="700" fontFamily="'JetBrains Mono',monospace">
+                        {p.count}
+                      </text>
+                    </g>
+                  )}
+                </g>
+              );
+            })}
+          </svg>
+        )}
       </div>
     </div>
   );
 }
 
-// ══════════════════════════════════════════════════════════════════════
 // SIDEBAR
 // ══════════════════════════════════════════════════════════════════════
 
@@ -753,7 +705,7 @@ function ActivityChart({ activityData, devices, selectedDate, isLive, mode, onMo
   const chartW    = W - PAD_L - PAD_R;
   const chartH    = H - PAD_T - PAD_B;
   const barGroupW = chartW / Math.max(hours.length, 1);
-  const barW      = Math.max(barGroupW * 0.72, 2);
+  const barW      = Math.max(barGroupW * 0.5, 2);
 
   return (
     <div className="hp-activity-card">
@@ -1020,8 +972,9 @@ function ActivityChart({ activityData, devices, selectedDate, isLive, mode, onMo
 
 export default function HomePage() {
   const { getDevices, getLatestLocation, getPlayback } = useCityTag();
+  const navigate = useNavigate();
 
-  const [filters, setFilters]       = useState({ region: 'all', area: 'all', date: todayStr() });
+  const [filters, setFilters]       = useState({ region: 'all', area: 'all', areaId: null, date: todayStr() });
   const [devices, setDevices]       = useState([]);
   const [devLoading, setDevLoading] = useState(true);
   const [locations, setLocations]   = useState({});
@@ -1118,7 +1071,7 @@ export default function HomePage() {
     // Incremental: only fetch delta since last sync — live only, and only if we already have data
     const useIncremental = incremental && live && !!activitySyncRef.current;
     const start = useIncremental ? new Date(activitySyncRef.current) : dayRange(dateStr, live).start;
-    const end   = live ? new Date() : dayRange(dateStr, live).end;
+    const end   = live ? new Date(Date.now() + 2 * 3600 * 1000) : dayRange(dateStr, live).end;
     const snapNow = new Date().toISOString(); // capture before any await
 
     if (!useIncremental) {
@@ -1188,12 +1141,14 @@ export default function HomePage() {
   }, [activityData, filteredDevices, filters.region]);
 
   const totalDevices = filteredDevices.length;
-  const activeNow = filteredDevices.filter(d => {
-    if (d.status === 'online') return true;
-    const sn = d.sn ?? '';
-    const ts = locations[sn]?.timestamp ?? locations[sn]?.time;
-    return ts && (Date.now() - new Date(ts).getTime()) < 30 * 60 * 1000;
-  }).length;
+  const activeNow = isLive
+    ? filteredDevices.filter(d => {
+        if (d.status === 'online') return true;
+        const sn = d.sn ?? '';
+        const ts = locations[sn]?.timestamp ?? locations[sn]?.time;
+        return ts && (Date.now() - new Date(ts).getTime()) < 30 * 60 * 1000;
+      }).length
+    : filteredDevices.filter(d => (filteredActivityData[d.sn ?? '']?.length ?? 0) > 0).length;
   const offlineCount = totalDevices - activeNow;
 
   // Weekly bind rate — devices bound during the ISO week containing the selected/today date
@@ -1220,7 +1175,7 @@ export default function HomePage() {
       <div className="hp-top-row">
         <LiveClock isHistorical={!isLive} selectedDate={filters.date} />
         <div className="hp-top-right">
-          <FilterBar filters={filters} onChange={setFilters} />
+          <FilterBar filters={filters} onChange={setFilters} kmlAreas={kmlAreas} kmlLoading={kmlAreas.length === 0} />
           {isLive && (
             <>
               <button className="hp-refresh-btn" onClick={fetchLocations}>
@@ -1270,18 +1225,12 @@ export default function HomePage() {
 
         {/* Top Devices, Top Users, Registrations, ZoneStats, DevicesPerUser — all in top band */}
         <TopDevices devices={filteredDevices} activityData={filteredActivityData} />
-        <RegistrationsDonut devices={filteredDevices} selectedDate={filters.date} />
+        <BoundDevicesChart devices={filteredDevices} selectedDate={filters.date} />
         <UserDevicePanel devices={filteredDevices} />
       </div>
 
-      {/*
-        ── Row 3: Main ─────────────────────────────────────────────
-        [Sidebar: RegionBreachPanel] | [Chart fills rest]
-      */}
+      {/* ── Row 3: Chart — full width ─────────────────────────── */}
       <div className="hp-main-row">
-        <div className="hp-sidebar">
-          <RegionBreachPanel breaches={regionBreaches} totalWithRegion={devices.filter(d => d.region).length} />
-        </div>
         <div className="hp-chart-area">
           <ActivityChart
             activityData={filteredActivityData}
@@ -1294,6 +1243,17 @@ export default function HomePage() {
             lastSync={locSync}
           />
         </div>
+      </div>
+
+      {/* Navigation to Field Staff Dashboard */}
+      <div className="hp-nav-field-staff">
+        <button 
+          className="hp-nav-field-staff-btn"
+          onClick={() => navigate('/field-staff-dashboard')}
+        >
+          <span className="hp-nav-field-staff-arrow">→</span>
+          <span className="hp-nav-field-staff-text">Go to Field Staff Dashboard</span>
+        </button>
       </div>
 
     </div>

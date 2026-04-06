@@ -17,6 +17,8 @@ class DeviceInDB(BaseModel):
     region: Optional[str] = None
     bound_at: Optional[datetime] = None    # stamped when device is assigned to a user
     created_at: datetime = Field(default_factory=datetime.utcnow)
+    location: Optional[str] = None         # sub-region / location label (admin-defined)
+    zone: Optional[str] = None             # zone label within a location (admin-defined)
 
     class Config:
         json_encoders = {ObjectId: str}

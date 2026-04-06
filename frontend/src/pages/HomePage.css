@@ -8,8 +8,8 @@
   --border:      #1f2028;
   --border-hi:   #2e3040;
   --text:        #ffffff;
-  --text-muted:  #9ca3af;
-  --text-dim:    #4a4d5e;
+  --text-muted:  #d1d5db;
+  --text-dim:    #8891a8;
   --accent:      #800000;
   --accent-glow: rgba(128,0,0,0.18);
   --green:       #4ade80;
@@ -17,6 +17,113 @@
   --orange:      #f97316;
   --r:           10px;
   --gap:         12px;
+}
+.area-dropdown {
+  position: absolute;
+  z-index: 9999;
+}
+.area-selector-wrapper {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+/* ─── Field Staff Dashboard Navigation ───────────────────────────── */
+.hp-nav-field-staff {
+  position: fixed;
+  bottom: 20px;
+  right: 20px;
+  z-index: 1000;
+  animation: slideInRight 0.4s ease-out;
+}
+
+.hp-nav-field-staff-btn {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: var(--surface);
+  color: var(--text);
+  border: 1px solid var(--border-hi);
+  border-radius: 8px;
+  padding: 9px 16px;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.3px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.5);
+  text-decoration: none;
+}
+
+.hp-nav-field-staff-btn::before {
+  content: '';
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--green);
+  flex-shrink: 0;
+  animation: fsd-pulse-dot 2.5s ease-in-out infinite;
+}
+
+@keyframes fsd-pulse-dot {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0.25; }
+}
+
+.hp-nav-field-staff-btn:hover {
+  background: var(--surface);
+  border-color: var(--accent);
+  color: var(--text);
+  box-shadow: 0 4px 16px rgba(128, 0, 0, 0.25);
+}
+
+.hp-nav-field-staff-btn:active {
+  transform: scale(0.97);
+}
+
+.hp-nav-field-staff-arrow {
+  font-size: 13px;
+  transition: transform 0.2s ease;
+  color: var(--accent);
+}
+
+.hp-nav-field-staff-btn:hover .hp-nav-field-staff-arrow {
+  transform: translateX(3px);
+}
+
+.hp-nav-field-staff-text {
+  white-space: nowrap;
+}
+
+@keyframes slideInRight {
+  from {
+    opacity: 0;
+    transform: translateX(100px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+/* ─── Responsive Design ───────────────────────────────────────────── */
+@media (max-width: 768px) {
+  .hp-nav-field-staff {
+    bottom: 16px;
+    right: 16px;
+    left: 16px;
+  }
+  
+  .hp-nav-field-staff-btn {
+    justify-content: center;
+    padding: 8px 14px;
+    font-size: 11px;
+  }
+
+  .hp-nav-field-staff-arrow {
+    font-size: 13px;
+  }
 }
 
 /* ─── Page ────────────────────────────────────────────────────── */
@@ -32,7 +139,8 @@
     linear-gradient(var(--border) 1px, transparent 1px),
     linear-gradient(90deg, var(--border) 1px, transparent 1px);
   background-size: auto, 40px 40px, 40px 40px;
-  overflow: hidden;
+  
+  overflow: visible;
   gap: var(--gap);
   font-family: 'Syne', sans-serif;
 }
@@ -56,14 +164,14 @@
 }
 .hp-heading-row { display: flex; align-items: center; gap: 16px; }
 .hp-heading-title {
-  font-size: 1.35rem;
+  font-size: 1.5rem;
   font-weight: 800;
   color: var(--text);
   margin: 0 0 2px;
   letter-spacing: -0.02em;
 }
 .hp-heading-sub {
-  font-size: 10px;
+  font-size: 12px;
   color: var(--text-muted);
   margin: 0;
   font-family: 'JetBrains Mono', monospace;
@@ -91,7 +199,7 @@
   border-radius: var(--r);
 }
 .hp-clock-time {
-  font-size: 0.95rem;
+  font-size: 1.1rem;
   font-weight: 700;
   color: var(--text);
   font-family: 'JetBrains Mono', monospace;
@@ -99,79 +207,110 @@
   font-variant-numeric: tabular-nums;
 }
 .hp-clock-date {
-  font-size: 9px;
+  font-size: 11px;
   color: var(--text-muted);
   margin-top: 1px;
   font-family: 'JetBrains Mono', monospace;
 }
-.hp-top-right { display: flex; align-items: center; gap: 10px; }
+.hp-top-right {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  position: relative;
+  overflow: visible;
+}
 
 /* ─── Filter Bar ──────────────────────────────────────────────── */
 .hp-filter-bar {
+  overflow: visible !important; 
+  position: relative;
+  z-index: 100; /* Keeps it above the charts below */
   display: flex;
-  align-items: flex-end;
-  gap: 10px;
+  gap: 8px; /* Reduced from 16px */
+  padding: 6px 12px; /* Reduced from 16px */
+  background: var(--surface);
+  border-radius: var(--r);
+  border: 1px solid var(--border);
+  align-items: center;
+  flex-wrap: wrap;
+  max-width: 1200px;
+  margin: 0 auto;
+}
+
+.hp-filter-group {
+  display: flex;
+  flex-direction: column;
+  gap: 4px; /* Reduced from 8px */
+  min-width: 180px; /* Slightly reduced */
+}
+
+.hp-filter-label {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text-muted);
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  margin-bottom: 2px; /* Reduced from 4px */
+}
+
+.hp-filter-select {
   background: var(--surface-2);
   border: 1px solid var(--border);
-  border-radius: var(--r);
-  padding: 8px 14px;
-}
-.hp-filter-group { display: flex; flex-direction: column; gap: 3px; }
-.hp-filter-label {
-  font-size: 9px;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.1em;
-  color: var(--text-muted);
+  border-radius: 8px;
+  padding: 8px 10px; /* Reduced padding */
+  color: var(--text);
+  font-size: 13px;
   font-family: 'JetBrains Mono', monospace;
-  white-space: nowrap;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  outline: none;
+  height: 32px; /* Explicit shorter height */
+}
+
+.hp-filter-select:hover {
+  border-color: var(--border-hi);
+  background: var(--surface-2);
+}
+
+.hp-filter-select:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px var(--accent-glow);
+}
+
+.hp-filter-hist-badge {
+  background: var(--orange);
+  color: var(--text);
+  font-size: 8px; /* Reduced from 9px */
+  padding: 1px 4px; /* Reduced padding */
+  border-radius: 4px;
+  margin-left: 6px; /* Reduced from 8px */
+  font-weight: 400;
+  text-transform: none;
+  letter-spacing: 0;
+}
+
+.hp-filter-live-btn {
+  background: var(--accent);
+  color: var(--text);
+  border: none;
+  border-radius: 8px;
+  padding: 6px 12px;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  height: 32px; /* Explicit shorter height */
   display: flex;
   align-items: center;
-  gap: 5px;
-}
-.hp-filter-hist-badge {
-  padding: 1px 5px;
-  border-radius: 3px;
-  background: rgba(249,115,22,0.15);
-  color: var(--orange);
-  font-size: 8px;
-  font-weight: 700;
-  border: 1px solid rgba(249,115,22,0.25);
-}
-.hp-filter-select {
-  background: var(--surface);
-  border: 1px solid var(--border-hi);
-  border-radius: 7px;
-  color: var(--text);
-  font-size: 11px;
-  font-family: 'JetBrains Mono', monospace;
-  padding: 4px 9px;
-  outline: none;
-  cursor: pointer;
-  height: 29px;
-  min-width: 115px;
-  transition: border-color 0.15s;
-}
-.hp-filter-select:hover { border-color: var(--accent); }
-.hp-filter-select:focus { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-glow); }
-.hp-filter-select:disabled { opacity: 0.35; cursor: not-allowed; }
-.hp-filter-date { color-scheme: dark; }
-.hp-filter-live-btn {
-  height: 29px;
-  padding: 0 12px;
-  border-radius: 7px;
-  border: 1px solid rgba(74,222,128,0.3);
-  background: var(--green-bg);
-  color: var(--green);
-  font-size: 10px;
-  font-weight: 700;
+  gap: 4px; /* Reduced from 6px */
   font-family: 'Syne', sans-serif;
-  cursor: pointer;
-  white-space: nowrap;
-  transition: background 0.15s, border-color 0.15s;
-  align-self: flex-end;
 }
-.hp-filter-live-btn:hover { background: rgba(74,222,128,0.14); border-color: rgba(74,222,128,0.5); }
+
+.hp-filter-live-btn:hover {
+  background: #cc2222;
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(128,0,0,0.3);
+}
 
 /* ─── Refresh btns ────────────────────────────────────────────── */
 .hp-refresh-btn {
@@ -184,7 +323,7 @@
   border: 1px solid var(--border-hi);
   background: var(--surface-2);
   color: var(--text-muted);
-  font-size: 10px;
+  font-size: 12px;
   font-weight: 700;
   font-family: 'Syne', sans-serif;
   cursor: pointer;
@@ -215,7 +354,7 @@
 
 /* Each stat card — compact, fixed height */
 .hp-stat-card {
-  background: var(--surface);
+  background: #5a2020;
   border: 1px solid var(--border);
   border-radius: var(--r);
   overflow: hidden;
@@ -244,7 +383,7 @@
   gap: 10px;
 }
 .hp-stat-title {
-  font-size: 8px;
+  font-size: 10px;
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.1em;
@@ -294,27 +433,17 @@
 
 
 /* ═══════════════════════════════════════════════════════════════
-   ROW 3 — Main: sidebar | chart (fills all remaining height)
+   ROW 3 — Main: chart only (no sidebar)
    ═══════════════════════════════════════════════════════════════ */
 .hp-main-row {
   display: flex;
   gap: var(--gap);
-  flex: 1;
+  height: 260px;
   min-height: 0;
   animation: hp-fade-up 0.3s ease 0.1s both;
 }
 
-/* Sidebar — breach panel only */
-.hp-sidebar {
-  width: 220px;
-  flex-shrink: 0;
-  display: flex;
-  flex-direction: column;
-  gap: var(--gap);
-  min-height: 0;
-}
-
-/* Chart fills ALL remaining space */
+/* Chart fills full width */
 .hp-chart-area {
   flex: 1;
   min-width: 0;
@@ -327,7 +456,7 @@
    BASE CARD
    ═══════════════════════════════════════════════════════════════ */
 .hp-card {
-  background: var(--surface);
+  background: #5a2020;
   border: none;
   border-radius: 16px;
   box-shadow: 10px 10px 20px #06070a, -10px -10px 20px #141518;
@@ -347,7 +476,7 @@
   flex-shrink: 0;
 }
 .hp-card-title {
-  font-size: 10px;
+  font-size: 12px;
   font-weight: 700;
   color: #ffffff;
   text-transform: uppercase;
@@ -399,7 +528,7 @@
   gap: 8px;
 }
 .hp-rank-name {
-  font-size: 11px;
+  font-size: 13px;
   font-weight: 700;
   color: var(--text);
   font-family: 'JetBrains Mono', monospace;
@@ -408,7 +537,7 @@
   white-space: nowrap;
 }
 .hp-rank-count {
-  font-size: 10px;
+  font-size: 12px;
   font-family: 'JetBrains Mono', monospace;
   flex-shrink: 0;
   font-weight: 700;
@@ -464,7 +593,7 @@
 .hp-dpu-row { display: flex; flex-direction: column; gap: 4px; }
 .hp-dpu-user-row { display: flex; align-items: center; gap: 7px; }
 .hp-dpu-username {
-  font-size: 10px;
+  font-size: 12px;
   font-weight: 700;
   color: var(--text);
   font-family: 'JetBrains Mono', monospace;
@@ -487,7 +616,7 @@
   padding-left: 29px;
 }
 .hp-dpu-chip {
-  font-size: 8px;
+  font-size: 10px;
   font-family: 'JetBrains Mono', monospace;
   padding: 1px 6px;
   border-radius: 3px;
@@ -525,7 +654,7 @@
 .hp-mode-btn {
   padding: 4px 10px;
   border-radius: 5px;
-  font-size: 9px;
+  font-size: 11px;
   font-weight: 700;
   cursor: pointer;
   border: 1px solid var(--border-hi);
@@ -555,7 +684,7 @@
   display: flex;
   align-items: center;
   gap: 5px;
-  font-size: 9px;
+  font-size: 11px;
   color: #8891a8;
   white-space: nowrap;
   font-family: 'JetBrains Mono', monospace;
@@ -592,8 +721,90 @@
   .hp-page      { overflow-y: auto; height: auto; }
   .hp-top-band  { flex-wrap: wrap; }
   .hp-stats-col { width: 100%; flex-direction: row; }
-  .hp-main-row  { flex-direction: column; }
-  .hp-sidebar   { width: 100%; flex-direction: row; max-height: none; }
+  .hp-main-row  { flex-direction: column; height: auto; min-height: 220px; }
   .hp-chart-area { min-height: 260px; }
 }
 
+/* Ensure the filter bar doesn't hide the dropdown */
+.hp-filter-bar {
+  overflow: visible !important; 
+  position: relative;
+  z-index: 100; /* Keeps it above the charts below */
+}
+
+/* This is the secret sauce: the Anchor */
+.area-selector-wrapper {
+  position: relative;
+  display: inline-flex; /* Shrink-wrap to button size */
+  align-items: center;
+  /* Override the parent's flex-end so it doesn't stretch weirdly */
+  align-self: center; 
+}
+
+/* Override AreaSelector fixed positioning to work with wrapper */
+.area-selector-wrapper .area-sel-dropdown {
+  position: absolute !important; /* Override position: fixed */
+  top: 100% !important; /* Position relative to wrapper */
+  left: 0 !important;
+  right: auto !important; /* Override JS positioning */
+  margin-top: 8px; /* Give it a small gap from the button */
+  transform: none !important; /* Reset any inherited transforms */
+  
+  width: 280px; /* Or whatever width you want */
+  z-index: 99999; /* Nuclear option to stay on top */
+}
+
+/* ===== AREA SELECTOR FIX ===== */
+
+.area-selector {
+  position: relative;
+  width: 100%;
+}
+
+/* Proper dropdown positioning */
+.area-dropdown {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  width: 100%;
+  min-width: 260px;
+
+  max-height: 260px;
+  overflow-y: auto;
+
+  background: #0b0c10;
+  border: 1px solid var(--border-hi);
+  border-radius: 8px;
+
+  box-shadow: 0 12px 30px rgba(0,0,0,0.7);
+
+  z-index: 99999;
+}
+
+/* ===== FIX STACKING CONTEXT ===== */
+
+/* Ensure dropdown layer is above cards */
+.hp-top-row {
+  position: relative;
+  z-index: 50;
+}
+
+/* Prevent cards from covering dropdown */
+.hp-card {
+  z-index: 1;
+}
+
+/* Ensure containers don't clip dropdown */
+.hp-filter-bar {
+  overflow: visible;
+  position: relative;
+}
+
+.hp-top-right {
+  position: relative;
+  overflow: visible;
+}
+
+.hp-page {
+  overflow: visible;
+}

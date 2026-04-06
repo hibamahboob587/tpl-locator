@@ -172,6 +172,11 @@ export function useCityTag() {
     }, [accessToken]
   );
 
+  const getFieldStaffLiveDevices = useCallback(
+    async () => apiFetch("/api/field-staff/live-devices", {}, accessToken),
+    [accessToken]
+  );
+
   return {
     login, adminLogin, signup,
     getDevices, getUsers, adminGetUsers, adminCreateUser,
@@ -179,5 +184,6 @@ export function useCityTag() {
     adminUpdateDevice,
     bindDevice, bindDeviceByEmail, unbindDevice, adminUnbindDevice,
     searchDevice, getLatestLocation, getTrajectory, getPlayback,
+    getFieldStaffLiveDevices,
   };
 }
