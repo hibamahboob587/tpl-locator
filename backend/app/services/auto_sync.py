@@ -1,88 +1,190 @@
 import asyncio
 from datetime import datetime, timedelta
 import logging
-from httpx import HTTPStatusError
+import json
+from pathlib import Path
+
+from httpx import AsyncClient, HTTPStatusError, ConnectTimeout, RequestError
 
 from app.dependencies import get_settings
 from app.services.mongodb import MongoService
 from app.services.citytag import CityTagClient, CityTagError
-from app.routers.auth import login, LoginRequest
 
 
-SYNC_INTERVAL_SECONDS = 60  # run every 60 seconds
+SYNC_INTERVAL_SECONDS = 300
 CITYTAG_PASSWORD = "Trakker123"
+
+ZOQIN_BASE_URL = "https://www.zoqin.com/ZQGPS/Device/getLocationListByTimeAndSN"
+ZOQIN_DEVICE_JSON_PATH = Path(__file__).resolve().parents[1] / "data" / "zoqin_devices.json"
+
 logger = logging.getLogger(__name__)
 
 
-async def try_relogin(email: str, uid: str, mongo: MongoService, citytag: CityTagClient) -> str | None:
-    """
-    Attempt to re-login to CityTag and update token in admin collection
-    """
+# -----------------------------------------------------
+# RELLOGIN (SAME AS ROUTE)
+# -----------------------------------------------------
+
+async def try_relogin(email: str, uid: str, mongo: MongoService, citytag: CityTagClient):
 
     logger.info("auto_sync try_relogin started email=%s uid=%s", email, uid)
 
     try:
+        token_response = await citytag.login(username=email, password=CITYTAG_PASSWORD)
+        token = token_response.get("token") if isinstance(token_response, dict) else None
 
-        payload = LoginRequest(
-            email=email,
-            password=CITYTAG_PASSWORD,
-            uid=uid
-        )
-
-        await login(payload=payload, mongo=mongo, citytag=citytag)
+        if not token:
+            return None
 
         admin_doc = await mongo.admins.find_one({"email": email})
+        if not admin_doc:
+            return None
 
-        if admin_doc and admin_doc.get("citytag_token"):
-            logger.info("auto_sync try_relogin success email=%s", email)
-            return admin_doc["citytag_token"]
+        await mongo.update_admin_token(str(admin_doc["_id"]), token)
+        return token
 
-        logger.warning("auto_sync try_relogin token_missing email=%s", email)
-        return None
-
-    except Exception as exc:
-
+    except Exception:
         logger.exception("auto_sync try_relogin failed email=%s", email)
         return None
 
 
-async def get_user_devices(citytag: CityTagClient, uid: str, token: str, email: str):
-    """
-    Fetch devices for a user. Returns None if token expired
-    """
+# -----------------------------------------------------
+# DEVICE FETCH WITH RETRIES (MATCH ROUTE)
+# -----------------------------------------------------
 
-    try:
+async def get_devices(citytag: CityTagClient, uid: str, token: str, email: str):
 
-        devices = await citytag.get_devices(uid=uid, token=token)
-        return devices
+    max_retries = 3
+    base_delay = 2
 
-    except (CityTagError, HTTPStatusError) as e:
+    for attempt in range(1, max_retries + 1):
 
-        msg = str(e).lower()
+        try:
+            return await citytag.get_devices(uid=uid, token=token)
 
-        if any(
-            kw in msg for kw in [
-                "token",
-                "expired",
-                "invalid token",
-                "invalid",
-                "401",
-                "unauthorized",
-                "400",
-                "bad request"
-            ]
-        ):
-            logger.warning("auto_sync token_invalid_or_expired email=%s error=%s", email, e)
-            return None
+        except (CityTagError, HTTPStatusError) as e:
 
-        logger.error("auto_sync get_user_devices failed email=%s error=%s", email, e)
+            msg = str(e).lower()
+
+            if any(x in msg for x in [
+                "token", "expired", "invalid",
+                "401", "unauthorized", "400"
+            ]):
+                logger.warning("auto_sync token_expired email=%s", email)
+                return None
+
+            logger.error("auto_sync get_devices error email=%s attempt=%s error=%s", email, attempt, e)
+
+        except (ConnectTimeout, RequestError) as e:
+            logger.warning("auto_sync network_error email=%s attempt=%s error=%s", email, attempt, e)
+
+        if attempt < max_retries:
+            await asyncio.sleep(base_delay * attempt)
+
+    return []
+
+
+# -----------------------------------------------------
+# ZOQIN DEVICE LOADER
+# -----------------------------------------------------
+
+def load_zoqin_device_sns():
+
+    if not ZOQIN_DEVICE_JSON_PATH.exists():
         return []
 
+    try:
+        with open(ZOQIN_DEVICE_JSON_PATH, "r") as f:
+            data = json.load(f)
+    except Exception:
+        return []
 
-async def sync_all_users() -> None:
-    """
-    Sync location history for all admins and their devices
-    """
+    devices = data.get("devices", []) if isinstance(data, dict) else data
+
+    sns = []
+    for d in devices:
+        if isinstance(d, str):
+            sns.append(d)
+        elif isinstance(d, dict):
+            sns.append(d.get("sn"))
+
+    return list(set(filter(None, sns)))
+
+
+# -----------------------------------------------------
+# ZOQIN SYNC (MATCH ROUTE)
+# -----------------------------------------------------
+
+async def sync_zoqin(mongo: MongoService):
+
+    sns = load_zoqin_device_sns()
+    if not sns:
+        return (0, 0)
+
+    admin = await mongo.admins.find_one({"email": "tpl@gmail.com"})
+    if not admin:
+        return (0, 0)
+
+    admin_id = str(admin["_id"])
+    uid = admin.get("uid") or "zoqin_vendor_tpl"
+
+    now = datetime.utcnow()
+    start = now.strftime("%Y-%m-%d 00:00:00")
+    end = now.strftime("%Y-%m-%d 23:59:59")
+
+    devices_count = 0
+    points_count = 0
+
+    async with AsyncClient(timeout=20) as client:
+
+        for sn in sns:
+
+            await mongo.upsert_device_from_citytag(
+                admin_id=admin_id,
+                citytag_device={"sn": sn, "assigned_name": sn}
+            )
+
+            try:
+                res = await client.get(ZOQIN_BASE_URL, params={
+                    "sn": sn,
+                    "startTime": start,
+                    "endTime": end
+                })
+
+                res.raise_for_status()
+                payload = res.json()
+
+            except Exception:
+                continue
+
+            if payload.get("code") != 200:
+                continue
+
+            devices_count += 1
+
+            for item in payload.get("data", []):
+
+                inserted = await mongo.upsert_location_from_citytag(
+                    history_item={
+                        "sn": item.get("sn") or sn,
+                        "latitude": item.get("latitude"),
+                        "longitude": item.get("longitude"),
+                        "gpstime": item.get("positioningTime")
+                    },
+                    uid=uid,
+                    sn=sn
+                )
+
+                if inserted:
+                    points_count += 1
+
+    return (devices_count, points_count)
+
+
+# -----------------------------------------------------
+# MAIN SYNC (MATCH ROUTE)
+# -----------------------------------------------------
+
+async def sync_all_users():
 
     settings = get_settings()
 
@@ -94,7 +196,10 @@ async def sync_all_users() -> None:
     total_admins = 0
     total_devices = 0
     total_points = 0
-    re_logins = 0
+    relogins = 0
+
+    start_time = datetime.utcnow() - timedelta(minutes=10)
+    end_time = datetime.utcnow()
 
     async for admin in mongo.admins.find({}):
 
@@ -103,102 +208,96 @@ async def sync_all_users() -> None:
         email = admin.get("email")
         uid = admin.get("uid")
         token = admin.get("citytag_token")
+        admin_id = str(admin.get("_id"))
 
-        if not all([email, uid]):
-            logger.warning("auto_sync skipping_admin missing_email_or_uid")
+        if not email or not uid:
             continue
 
         current_token = token
 
-        devices = (
-            await get_user_devices(citytag, uid, current_token, email)
-            if current_token else None
-        )
+        devices = await get_devices(citytag, uid, current_token, email) if current_token else None
 
-        # token expired → relogin
         if devices is None:
 
             new_token = await try_relogin(email, uid, mongo, citytag)
 
-            if new_token:
+            if not new_token:
+                continue
 
-                current_token = new_token
-                re_logins += 1
+            relogins += 1
+            current_token = new_token
 
-                devices = await get_user_devices(citytag, uid, current_token, email)
+            devices = await get_devices(citytag, uid, current_token, email)
 
-                if devices is None:
-                    logger.warning("auto_sync devices_unavailable_after_relogin email=%s", email)
-                    continue
-
-            else:
-                logger.warning("auto_sync relogin_failed email=%s", email)
+            if devices is None:
                 continue
 
         if not devices:
-            logger.info("auto_sync no_devices email=%s", email)
             continue
 
         total_devices += len(devices)
 
-        start_time = datetime.utcnow() - timedelta(minutes=15)
-        end_time = datetime.utcnow()
-
         for device in devices:
 
-            sn = device.get("sn")
+            await mongo.upsert_device_from_citytag(
+                admin_id=admin_id,
+                citytag_device=device
+            )
 
+            sn = device.get("sn")
             if not sn:
                 continue
 
             try:
-
                 history = await citytag.get_location_history(
                     uid=uid,
                     token=current_token,
                     sn=sn,
                     start_time=start_time,
-                    end_time=end_time,
+                    end_time=end_time
                 )
 
-            except (CityTagError, HTTPStatusError) as e:
-                logger.error("auto_sync history_fetch_failed email=%s sn=%s error=%s", email, sn, e)
+            except (CityTagError, HTTPStatusError):
                 continue
-
-            inserted_this_device = 0
 
             for item in history:
 
                 inserted = await mongo.upsert_location_from_citytag(
                     history_item=item,
                     uid=uid,
-                    sn=sn,
+                    sn=sn
                 )
 
                 if inserted:
-
-                    inserted_this_device += 1
                     total_points += 1
 
-            if inserted_this_device:
-                logger.info("auto_sync inserted_points email=%s sn=%s count=%s", email, sn, inserted_this_device)
+    # ZOQIN SYNC
+    try:
+        z_devices, z_points = await sync_zoqin(mongo)
+        total_devices += z_devices
+        total_points += z_points
+    except Exception:
+        logger.exception("auto_sync zoqin failed")
+
     logger.info(
-        "auto_sync completed admins=%s relogins=%s devices=%s points=%s",
+        "auto_sync completed admins=%s devices=%s points=%s relogins=%s",
         total_admins,
-        re_logins,
         total_devices,
         total_points,
+        relogins,
     )
 
 
-async def scheduler_loop() -> None:
+# -----------------------------------------------------
+# SCHEDULER
+# -----------------------------------------------------
+
+async def scheduler_loop():
 
     await sync_all_users()
 
     while True:
-
         await asyncio.sleep(SYNC_INTERVAL_SECONDS)
-
         await sync_all_users()
 
 
@@ -206,6 +305,5 @@ def start_auto_sync_tasks(app):
 
     @app.on_event("startup")
     async def start_scheduler():
-        logger.info("auto_sync scheduler_starting")
-
+        logger.info("auto_sync scheduler starting")
         asyncio.create_task(scheduler_loop())
