@@ -5,6 +5,7 @@ import { Navigate, Route, Routes } from "react-router-dom";
 import Login from "./pages/Login.jsx";
 import { useAuth } from "./context/AuthContext.jsx";
 import { MapThemeProvider } from "./context/MapThemeContext.jsx";
+import { BindCacheProvider } from "./context/BindCacheContext.jsx";
 
 import Layout from "./components/Layout.jsx";
 import HomePage from "./pages/HomePage.jsx";
@@ -32,6 +33,7 @@ export default function App() {
         path="/*"
         element={
           <ProtectedRoute>
+            <BindCacheProvider>
             <MapThemeProvider>
               <Layout>
                 <Routes>
@@ -48,6 +50,7 @@ export default function App() {
                 </Routes>
               </Layout>
             </MapThemeProvider>
+            </BindCacheProvider>
           </ProtectedRoute>
         }
       />

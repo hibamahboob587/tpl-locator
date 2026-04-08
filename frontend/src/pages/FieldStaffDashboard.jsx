@@ -8,14 +8,14 @@ import './FieldStaffDashboard.css';
 
 mapboxgl.accessToken = import.meta.env?.VITE_MAPBOX_TOKEN || process.env?.REACT_APP_MAPBOX_TOKEN || '';
 
-// ─── Map Section Component ───────────────────────────────────────────────
+
+// ─── Map Section ─────────────────────────────────────────────────────────────
 function MapSection({ filteredDevices, mapContainerRef }) {
-  const mapRef = useRef(null);
+  const mapRef     = useRef(null);
   const markersRef = useRef([]);
 
   useEffect(() => {
     if (!mapContainerRef.current) return;
-
     const map = new mapboxgl.Map({
       container: mapContainerRef.current,
       style: 'mapbox://styles/mapbox/dark-v11',
@@ -23,48 +23,34 @@ function MapSection({ filteredDevices, mapContainerRef }) {
       zoom: 10,
       attributionControl: false,
     });
-
     mapRef.current = map;
     map.addControl(new mapboxgl.NavigationControl(), 'top-right');
-
-    return () => {
-      map.remove();
-      mapRef.current = null;
-    };
+    return () => { map.remove(); mapRef.current = null; };
   }, []);
 
   useEffect(() => {
     const map = mapRef.current;
     if (!map) return;
-
-    // Clear existing markers
     markersRef.current.forEach(m => m.remove());
     markersRef.current = [];
-
-    // Only place markers for devices that have coordinates
     const withCoords = filteredDevices.filter(d => d.latitude != null && d.longitude != null);
     if (!withCoords.length) return;
-
     withCoords.forEach(device => {
-      const color = device.isOnline ? '#4ade80' : '#ef4444';
-
-      const marker = new mapboxgl.Marker({ color, scale: 0.8 })
+      const color  = device.isOnline ? '#22c55e' : '#ef4444';
+      const marker = new mapboxgl.Marker({ color, scale: 0.85 })
         .setLngLat([device.longitude, device.latitude])
         .setPopup(
-          new mapboxgl.Popup({ closeButton: false, className: 'fsd-map-popup' }).setHTML(`
-            <div class="fsd-popup-content">
-              <strong>${device.name || device.sn}</strong><br>
-              ${device.assignedUser || 'Unassigned'}<br>
-              ${device.region || 'No region'}${device.location ? ' › ' + device.location : ''}${device.zone ? ' › ' + device.zone : ''}
+          new mapboxgl.Popup({ closeButton: false }).setHTML(`
+            <div style="font-family:'Nunito',sans-serif;padding:4px 2px;min-width:160px;">
+              <div style="font-weight:700;font-size:13px;color:#f9fafb;margin-bottom:4px;">${device.name || device.sn}</div>
+              <div style="font-size:12px;color:#d1d5db;margin-bottom:2px;">${device.assignedUser || 'Unassigned'}</div>
+              <div style="font-size:11px;color:#9ca3af;">${device.region || 'No region'}${device.location ? ' › ' + device.location : ''}${device.zone ? ' › ' + device.zone : ''}</div>
             </div>
           `)
         )
         .addTo(map);
-
       markersRef.current.push(marker);
     });
-
-    // Fit bounds to all visible markers
     const bounds = new mapboxgl.LngLatBounds();
     withCoords.forEach(d => bounds.extend([d.longitude, d.latitude]));
     map.fitBounds(bounds, { padding: 60, maxZoom: 15 });
@@ -73,9 +59,9 @@ function MapSection({ filteredDevices, mapContainerRef }) {
   return <div ref={mapContainerRef} className="fsd-map-container" />;
 }
 
-// ─── Top 5 Staff Component ───────────────────────────────────────────────
+
+// ─── Top 5 Staff ─────────────────────────────────────────────────────────────
 function TopStaffPanel({ devices }) {
-  // Rank by online status first, then alphabetically — replace with real time data when available
   const topStaff = useMemo(() => {
     const seen = new Set();
     return devices
@@ -88,10 +74,13 @@ function TopStaffPanel({ devices }) {
       .slice(0, 5);
   }, [devices]);
 
+  const rankLabels = ['🥇', '🥈', '🥉', '4', '5'];
+
   return (
     <div className="fsd-top-staff">
       <div className="fsd-card-header">
         <span className="fsd-card-title">Top 5 Active Staff</span>
+        <span className="fsd-record-count">{topStaff.length} staff</span>
       </div>
       <div className="fsd-staff-list">
         {topStaff.length === 0 ? (
@@ -99,13 +88,15 @@ function TopStaffPanel({ devices }) {
         ) : (
           topStaff.map((staff, index) => (
             <div key={staff.assignedUser} className="fsd-staff-item">
-              <div className="fsd-staff-rank">{index + 1}</div>
+              <div className={`fsd-staff-rank ${index === 0 ? 'fsd-staff-rank-gold' : ''}`}>
+                {rankLabels[index]}
+              </div>
               <div className="fsd-staff-info">
                 <div className="fsd-staff-name">{staff.assignedUser}</div>
                 <div className="fsd-staff-time">
                   {staff.isOnline
-                    ? <span style={{ color: 'var(--green)' }}>● Online</span>
-                    : <span style={{ color: 'var(--text-muted)' }}>Offline</span>
+                    ? <span style={{ color: '#4ade80', fontWeight: 600 }}>● Online</span>
+                    : <span style={{ color: '#6b7280' }}>Offline</span>
                   }
                 </div>
               </div>
@@ -117,56 +108,69 @@ function TopStaffPanel({ devices }) {
   );
 }
 
-// ─── Zone Table Component ────────────────────────────────────────────────
-function ZoneTable({ devices }) {
-  const filteredData = devices;
 
+// ─── Zone Table ───────────────────────────────────────────────────────────────
+function ZoneTable({ devices }) {
   return (
     <div className="fsd-zone-table-container">
       <div className="fsd-card-header">
         <span className="fsd-card-title">Staff Zone Activity</span>
-        <span className="fsd-record-count">{filteredData.length} records</span>
+        <span className="fsd-record-count">{devices.length} records</span>
       </div>
       <div className="fsd-table-wrapper">
         <table className="fsd-zone-table">
           <thead>
             <tr>
               <th>User Name</th>
-              <th>Device</th>
-              <th>Region</th>
-              <th>Location</th>
-              <th>Zone</th>
+              <th>Locator</th>
+              <th>Area / Location</th>
+              <th>Coordinates</th>
               <th>Status</th>
               <th>Last Seen</th>
             </tr>
           </thead>
           <tbody>
-            {filteredData.length === 0 ? (
+            {devices.length === 0 ? (
               <tr>
-                <td colSpan="7" className="fsd-empty-row">
-                  No data available for selected filters
-                </td>
+                <td colSpan="6" className="fsd-empty-row">No data available</td>
               </tr>
             ) : (
-              filteredData.map((device, index) => (
-                <tr key={`${device.sn}-${index}`}>
-                  <td>{device.assignedUser || 'Unassigned'}</td>
-                  <td>{device.name || device.sn}</td>
-                  <td>{device.region || '—'}</td>
-                  <td>{device.location || '—'}</td>
-                  <td>{device.zone || '—'}</td>
-                  <td>
-                    <span className={device.isOnline ? 'fsd-badge-online' : 'fsd-badge-offline'}>
-                      {device.isOnline ? 'Online' : 'Offline'}
-                    </span>
-                  </td>
-                  <td className="fsd-col-lastseen">
-                    {device.lastSeen
-                      ? new Date(device.lastSeen).toLocaleString()
-                      : '—'}
-                  </td>
-                </tr>
-              ))
+              devices.map((device, index) => {
+                const areaLocation =
+                  device.location ||
+                  [device.region, device.zone].filter(Boolean).join(' › ') ||
+                  '—';
+                const coordinates = device.latitude && device.longitude
+                  ? `${device.latitude.toFixed(6)}, ${device.longitude.toFixed(6)}`
+                  : '—';
+                return (
+                  <tr key={`${device.sn}-${index}`}>
+                    <td style={{ fontWeight: 700, color: '#f9fafb' }}>{device.assignedUser || 'Unassigned'}</td>
+                    <td>{device.name || device.sn}</td>
+                    <td>{areaLocation}</td>
+                    <td className="fsd-col-coordinates">
+                      {coordinates !== '—' ? (
+                        <a
+                          href={`https://www.google.com/maps?q=${device.latitude},${device.longitude}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="fsd-coord-link"
+                        >
+                          {coordinates}
+                        </a>
+                      ) : '—'}
+                    </td>
+                    <td>
+                      <span className={device.isOnline ? 'fsd-badge-online' : 'fsd-badge-offline'}>
+                        {device.isOnline ? 'Online' : 'Offline'}
+                      </span>
+                    </td>
+                    <td className="fsd-col-lastseen">
+                      {device.lastSeen ? new Date(device.lastSeen).toLocaleString() : '—'}
+                    </td>
+                  </tr>
+                );
+              })
             )}
           </tbody>
         </table>
@@ -175,20 +179,20 @@ function ZoneTable({ devices }) {
   );
 }
 
-// ─── Main Component ─────────────────────────────────────────────────────
+
+// ─── Main Component ───────────────────────────────────────────────────────────
 export default function FieldStaffDashboard() {
   const { getFieldStaffLiveDevices } = useCityTag();
   const mapContainerRef = useRef(null);
-  const navigate = useNavigate();
-
+  const navigate        = useNavigate();
   const { areas, kmlLoading } = useKmlAreas();
 
   const [devices, setDevices]   = useState([]);
   const [loading, setLoading]   = useState(true);
-  const [error, setError]       = useState(null);
+  const [error,   setError]     = useState(null);
   const [selectedAreaId, setSelectedAreaId] = useState(null);
   const [dateFrom, setDateFrom] = useState('');
-  const [dateTo, setDateTo]     = useState('');
+  const [dateTo,   setDateTo]   = useState('');
 
   const fetchDevices = useCallback(async () => {
     try {
@@ -203,9 +207,7 @@ export default function FieldStaffDashboard() {
     }
   }, [getFieldStaffLiveDevices]);
 
-  useEffect(() => {
-    fetchDevices();
-  }, [fetchDevices]);
+  useEffect(() => { fetchDevices(); }, [fetchDevices]);
 
   const filteredDevices = useMemo(() => {
     let list = devices;
@@ -225,8 +227,8 @@ export default function FieldStaffDashboard() {
   if (loading) {
     return (
       <div className="fsd-loading">
-        <div className="fsd-spinner"></div>
-        <p>Loading Field Staff Dashboard...</p>
+        <div className="fsd-spinner" />
+        <p style={{ fontSize: 14, fontWeight: 600 }}>Loading Field Staff Dashboard…</p>
       </div>
     );
   }
@@ -234,10 +236,8 @@ export default function FieldStaffDashboard() {
   if (error) {
     return (
       <div className="fsd-loading">
-        <p style={{ color: 'var(--text-muted)' }}>{error}</p>
-        <button className="fsd-back-btn" onClick={fetchDevices} style={{ marginTop: 12 }}>
-          Retry
-        </button>
+        <p style={{ color: '#f87171', fontSize: 14 }}>{error}</p>
+        <button className="fsd-back-btn" onClick={fetchDevices} style={{ marginTop: 12 }}>Retry</button>
       </div>
     );
   }
@@ -247,95 +247,85 @@ export default function FieldStaffDashboard() {
   return (
     <div className="fsd-dashboard">
 
-      {/* Header */}
+      {/* ── Header ── */}
       <div className="fsd-header">
-        <button
-          className="fsd-back-btn"
-          onClick={() => navigate('/Homepage')}
-        >
-          ‹ Back
-        </button>
-
-        <div className="fsd-header-text">
-          <h1 className="fsd-title">Field Staff Dashboard</h1>
-          <p className="fsd-subtitle">
-            {onlineCount} of {devices.length} devices online
-          </p>
-        </div>
-
-        <div className="fsd-header-right">
-          <div className="fsd-filters-bar">
-            {/* This wrapper is now the anchor point */}
-            <div className="area-selector-wrapper">
-              <AreaSelector
-                value={selectedAreaId}
-                onChange={setSelectedAreaId}
-                areas={areas}
-                loading={kmlLoading}
-              />
-            </div>
-
-            <div className="fsd-filter-group">
-              <label className="fsd-filter-label">
-                Date From {dateFrom && <span className="fsd-filter-hist-badge">Historical</span>}
-              </label>
-              <input
-                type="date"
-                className="fsd-filter-select fsd-filter-date"
-                value={dateFrom}
-                max={dateTo || undefined}
-                onClick={e => { try { e.target.showPicker(); } catch {} }}
-                onChange={e => setDateFrom(e.target.value)}
-              />
-            </div>
-
-            <div className="fsd-filter-group">
-              <label className="fsd-filter-label">
-                Date To {dateTo && <span className="fsd-filter-hist-badge">Historical</span>}
-              </label>
-              <input
-                type="date"
-                className="fsd-filter-select fsd-filter-date"
-                value={dateTo}
-                min={dateFrom || undefined}
-                onClick={e => { try { e.target.showPicker(); } catch {} }}
-                onChange={e => setDateTo(e.target.value)}
-              />
-            </div>
-
-            {(dateFrom || dateTo) && (
-              <button
-                className="fsd-filter-live-btn"
-                onClick={() => { setDateFrom(''); setDateTo(''); }}
-              >
-                ● Clear Dates
-              </button>
-            )}
+        <div className="fsd-header-left">
+          <button className="fsd-back-btn" onClick={() => navigate('/Homepage')}>‹ Back</button>
+          <div className="fsd-header-text">
+            <h1 className="fsd-title">Field Staff Dashboard</h1>
+            <p className="fsd-subtitle">
+              <span className="fsd-online-dot" />
+              {onlineCount} of {devices.length} locators online
+            </p>
           </div>
         </div>
+
+        <div className="fsd-filters-bar">
+          <div className="area-selector-wrapper">
+            <AreaSelector
+              value={selectedAreaId}
+              onChange={setSelectedAreaId}
+              areas={areas}
+              loading={kmlLoading}
+            />
+          </div>
+
+          <div className="fsd-filter-group">
+            <label className="fsd-filter-label">
+              Date From {dateFrom && <span className="fsd-filter-hist-badge">Historical</span>}
+            </label>
+            <input
+              type="date"
+              className="fsd-filter-select fsd-filter-date"
+              value={dateFrom}
+              max={dateTo || undefined}
+              onClick={e => { try { e.target.showPicker(); } catch {} }}
+              onChange={e => setDateFrom(e.target.value)}
+            />
+          </div>
+
+          <div className="fsd-filter-group">
+            <label className="fsd-filter-label">
+              Date To {dateTo && <span className="fsd-filter-hist-badge">Historical</span>}
+            </label>
+            <input
+              type="date"
+              className="fsd-filter-select fsd-filter-date"
+              value={dateTo}
+              min={dateFrom || undefined}
+              onClick={e => { try { e.target.showPicker(); } catch {} }}
+              onChange={e => setDateTo(e.target.value)}
+            />
+          </div>
+
+          {(dateFrom || dateTo) && (
+            <button className="fsd-filter-live-btn" onClick={() => { setDateFrom(''); setDateTo(''); }}>
+              ✕ Clear Dates
+            </button>
+          )}
+        </div>
       </div>
 
-      {/* Main Content */}
-      <div className="fsd-content">
+      {/* ── Top Layout: Map (2fr) | Side Column (1fr) ── */}
+      <div className="fsd-top-layout">
 
-        {/* Map */}
+        {/* Left — Map */}
         <div className="fsd-map-card">
-          <MapSection
-            filteredDevices={filteredDevices}
-            mapContainerRef={mapContainerRef}
-          />
+          <MapSection filteredDevices={filteredDevices} mapContainerRef={mapContainerRef} />
         </div>
 
-        {/* Right Panel */}
-        <div className="fsd-side-card">
-          <TopStaffPanel devices={filteredDevices} />
+        {/* Right — Top Staff + Zone Table stacked */}
+        <div className="fsd-side-cards">
+
+          <div className="fsd-side-card">
+            <TopStaffPanel devices={filteredDevices} />
+          </div>
+
+          <div className="fsd-table-card">
+            <ZoneTable devices={filteredDevices} />
+          </div>
+
         </div>
-
-      </div>
-
-      {/* Table */}
-      <div className="fsd-table-card">
-        <ZoneTable devices={devices} />
       </div>
 
     </div>

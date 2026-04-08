@@ -271,7 +271,7 @@ const Layout = ({ children }) => {
 
   const navItems = [
     { path: '/Homepage',   label: 'Home'       },
-    { path: '/devices',    label: 'Devices'    },
+    { path: '/devices',    label: 'Locators'   },
     { path: '/trajectory', label: 'Trajectory' },
     { path: '/mapview',    label: 'Map View'   },
     { path: '/playback',   label: 'Playback'   },

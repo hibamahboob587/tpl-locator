@@ -15,5 +15,6 @@
       "port": 8000,
       "cwd": "backend"
     }
-  ]
+  ],
+  "autoVerify": false
 }

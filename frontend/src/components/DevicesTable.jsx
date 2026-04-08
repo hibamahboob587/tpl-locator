@@ -34,7 +34,7 @@ function formatDateTimeWithOffset(value, offsetHours = 0) {
   }
 }
 
-const TPLLoader = ({ label = "Loading devices…" }) => (
+const TPLLoader = ({ label = "Loading locators…" }) => (
   <div style={{
     display: 'flex', flexDirection: 'column', alignItems: 'center',
     justifyContent: 'center', padding: '60px 20px', gap: 20,
@@ -63,11 +63,11 @@ const DevicesTable = ({
   const navigate = useNavigate();
   const [sortConfig, setSortConfig] = useState({ key: null, direction: 'asc' });
 
-  if (loading) return <TPLLoader label="Loading devices…" />;
+  if (loading) return <TPLLoader label="Loading locators…" />;
 
   const COLUMNS = [
     { key: 'sn',                label: 'Serial Number' },
-    { key: 'name',              label: 'Device Name' },
+    { key: 'name',              label: 'Locator Name' },
     ...(isAdmin ? [
       { key: 'client',              label: 'Client' },
       { key: 'assigned_user_name',  label: 'Assigned User' },
@@ -267,12 +267,12 @@ const DevicesTable = ({
             <circle cx="11" cy="11" r="8" strokeWidth="1.5"/>
             <path d="m21 21-4.35-4.35" strokeWidth="1.5"/>
           </svg>
-          <p>No devices found</p>
+          <p>No locators found</p>
         </div>
       )}
 
       <div className="table-footer">
-        <span>{sorted.length} device{sorted.length !== 1 ? 's' : ''} shown</span>
+        <span>{sorted.length} locator{sorted.length !== 1 ? 's' : ''} shown</span>
       </div>
     </div>
   );
