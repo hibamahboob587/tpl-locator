@@ -82,15 +82,7 @@ export default function MapViewPage() {
 
   const latestWithOffset = useMemo(() => {
     if (!latest) return null;
-    const ts = latest?.timestamp ?? latest?.time ?? latest?.locTime;
-    if (!ts) return latest;
-    const d = new Date(ts);
-    if (isNaN(d.getTime())) return latest;
-    d.setHours(d.getHours() - 3);
-    const offsetTs = d.toISOString();
-    if (latest?.timestamp != null) return { ...latest, timestamp: offsetTs };
-    if (latest?.time      != null) return { ...latest, time:      offsetTs };
-    return { ...latest, locTime: offsetTs };
+    return latest;
   }, [latest]);
 
   const lat = latest?.lat ?? latest?.latitude ?? latest?.gpsLat ?? latest?.wgLat;
