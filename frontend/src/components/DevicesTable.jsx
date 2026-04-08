@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import tplLogo from '../assets/tpl.png';
+import TPLLoader from './TPLLoader.jsx';
 import './DevicesTable.css';
 
 function formatDateTime(value) {
@@ -33,23 +33,6 @@ function formatDateTimeWithOffset(value, offsetHours = 0) {
     return '—';
   }
 }
-
-const TPLLoader = ({ label = "Loading locators…" }) => (
-  <div style={{
-    display: 'flex', flexDirection: 'column', alignItems: 'center',
-    justifyContent: 'center', padding: '60px 20px', gap: 20,
-  }}>
-    <style>{`
-      @keyframes tpl-pulse {
-        0%   { opacity: 0.15; transform: scale(0.95); }
-        50%  { opacity: 0.7;  transform: scale(1.02); }
-        100% { opacity: 0.15; transform: scale(0.95); }
-      }
-    `}</style>
-    <img src={tplLogo} alt="Loading" style={{ width: 110, height: 'auto', filter: 'brightness(0) invert(1)', animation: 'tpl-pulse 1.6s ease-in-out infinite' }} />
-    <span style={{ color: '#52525b', fontSize: 12, letterSpacing: '0.08em', textTransform: 'uppercase' }}>{label}</span>
-  </div>
-);
 
 const DevicesTable = ({
   devices = [],

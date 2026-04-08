@@ -261,7 +261,7 @@ const Layout = ({ children }) => {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
   // Pages where map theme toggle should be hidden
-  const hideMapThemePaths = ['/', '/Homepage', '/devices', '/report'];
+  const hideMapThemePaths = ['/', '/Homepage', '/devices', '/report', '/field-staff-dashboard'];
   const shouldHideMapTheme = hideMapThemePaths.includes(location.pathname);
 
   const handleLogout = () => {
