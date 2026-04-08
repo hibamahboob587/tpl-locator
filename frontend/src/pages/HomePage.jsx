@@ -2,14 +2,16 @@ import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import './HomePage.css';
 import { useCityTag } from '../hooks/useCityTag.js';
 import { parseKMLText, pointInArea } from '../utils/geofenceUtils.js';
+import { useNavigate } from "react-router-dom";
+import { useBindCache } from '../context/BindCacheContext.jsx';
 
 // ══════════════════════════════════════════════════════════════════════
 // CONSTANTS & UTILITIES
 // ══════════════════════════════════════════════════════════════════════
 
-const LOCATION_POLL_MS   = 8_000;    // fast live refresh
-const TRAJECTORY_POLL_MS = 20_000;   // incremental chart refresh (fast — only fetches delta)
-const FETCH_CONCURRENCY  = 10;       // increased from 5
+const LOCATION_POLL_MS   = 8_000;
+const TRAJECTORY_POLL_MS = 20_000;
+const FETCH_CONCURRENCY  = 10;
 
 function todayStr() { return new Date().toISOString().slice(0, 10); }
 
@@ -45,7 +47,6 @@ function niceScale(maxVal, tickCount = 5) {
 }
 
 const KML_REGIONS = [
-  // ── Lahore Division — individual towns ──────────────────────────────
   { label: 'Lahore — All Towns',         value: 'lahore_all',      areas: ['Ravi Town','Shalimar Town','Wagha Town','Aziz Bhatti Town','Gulberg Town','DGBT','Samnabad Town','Allama Iqbal Town','Nishter Town'] },
   { label: 'Lahore — Ravi Town',         value: 'ravi_town',       areas: ['Ravi Town'] },
   { label: 'Lahore — Shalimar Town',     value: 'shalimar_town',   areas: ['Shalimar Town'] },
@@ -56,13 +57,9 @@ const KML_REGIONS = [
   { label: 'Lahore — Samnabad Town',     value: 'samnabad',        areas: ['Samnabad Town'] },
   { label: 'Lahore — Allama Iqbal Town', value: 'allama_iqbal',    areas: ['Allama Iqbal Town'] },
   { label: 'Lahore — Nishter Town',      value: 'nishter',         areas: ['Nishter Town'] },
-  // ── Sheikhupura District ─────────────────────────────────────────────
   { label: 'Sheikhupura District',       value: 'sheikhupura',     areas: ['Sheikhupura','Ferozewala','Kot Abdul Malik','Muridke','Narang','Khanqah Dogran','Safdarabad','Sharaqpur','Farooqabad','Mananwala','Sheikhupura Tehsil','Sharaqpura Tehsil'] },
-  // ── Nankana District ─────────────────────────────────────────────────
   { label: 'Nankana District',           value: 'nankana',         areas: ['Nankana Sahib','Warburton','Sangla Hill','Shah Kot','Nankana Sahib Tehsil'] },
-  // ── Kasur District ───────────────────────────────────────────────────
   { label: 'Kasur District',             value: 'kasur',           areas: ['Pattoki Tehsil','Chunian Tehsil','Kasur Tehsil','Kasur'] },
-  // ── Bahawalpur District ──────────────────────────────────────────────
   { label: 'Bahawalpur District',        value: 'bahawalpur',      areas: ['Bahawalpur Tehsil','Liaquatpur Tehsil','Bahawalpur'] },
 ];
 
@@ -72,60 +69,55 @@ const CHART_COLORS = [
   '#6366f1','#f43f5e',
 ];
 
-// ══════════════════════════════════════════════════════════════════════
-// HEADER COMPONENTS
-// ══════════════════════════════════════════════════════════════════════
+// ── Relative time formatter ────────────────────────────────────────────
+function fmtRelTime(ts) {
+  if (!ts) return '—';
+  try {
+    const diff = Date.now() - new Date(ts).getTime();
+    if (isNaN(diff) || diff < 0) return '—';
+    if (diff < 60_000)       return 'Just now';
+    if (diff < 3_600_000)    return `${Math.floor(diff / 60_000)}m ago`;
+    if (diff < 86_400_000)   return `${Math.floor(diff / 3_600_000)}h ago`;
+    if (diff < 604_800_000)  return `${Math.floor(diff / 86_400_000)}d ago`;
+    return new Date(ts).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+  } catch { return '—'; }
+}
 
-function LiveClock({ isHistorical, selectedDate }) {
+// ══════════════════════════════════════════════════════════════════════
+// HEADER: LiveClock + inline date picker
+// ══════════════════════════════════════════════════════════════════════
+function LiveClock({ isHistorical, selectedDate, onDateChange }) {
   const [now, setNow] = useState(new Date());
   useEffect(() => {
     const t = setInterval(() => setNow(new Date()), 1000);
     return () => clearInterval(t);
   }, []);
   const timeStr = now.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-  const dateStr = now.toLocaleDateString('en-US', { weekday: 'short', year: 'numeric', month: 'short', day: 'numeric' });
+  const dateStr = now.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
   return (
-    <div className="hp-heading-row">
-      <div>
-        <h1 className="hp-heading-title">Dashboard</h1>
-        <p className="hp-heading-sub">
-          {isHistorical
-            ? `Historical — ${new Date(selectedDate + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}`
-            : 'Live monitoring'}
-        </p>
-      </div>
+    <div className="hp-header-controls">
       <div className="hp-clock">
         <span className="hp-clock-time">{timeStr}</span>
-        <span className="hp-clock-date">{dateStr}</span>
+        <span className="hp-clock-date">{isHistorical ? 'Historical' : dateStr}</span>
       </div>
-    </div>
-  );
-}
-
-function FilterBar({ filters, onChange }) {
-  const isHistorical = filters.date !== todayStr();
-  return (
-    <div className="hp-filter-bar">
-      <div className="hp-filter-group">
-        <label className="hp-filter-label">Region</label>
-        <select className="hp-filter-select" value={filters.region}
-          onChange={e => onChange({ ...filters, region: e.target.value, area: 'all' })}>
-          <option value="all">All Regions</option>
-          {KML_REGIONS.map(r => <option key={r.value} value={r.value}>{r.label}</option>)}
-        </select>
-      </div>
-      <div className="hp-filter-group">
-        <label className="hp-filter-label">
-          Date {isHistorical && <span className="hp-filter-hist-badge">Historical</span>}
+      <div className="hp-hdr-date-group">
+        <label className="hp-hdr-date-label">
+          Date {isHistorical && <span className="hp-filter-hist-badge">HIST</span>}
         </label>
-        <input type="date" className="hp-filter-select hp-filter-date"
-          value={filters.date} max={todayStr()}
+        <input
+          type="date"
+          className="hp-filter-select hp-filter-date"
+          value={selectedDate}
+          max={todayStr()}
           onClick={e => { try { e.target.showPicker(); } catch {} }}
-          onChange={e => onChange({ ...filters, date: e.target.value })} />
+          onChange={e => onDateChange(e.target.value)}
+          style={{ height: 28, fontSize: 11 }}
+        />
       </div>
       {isHistorical && (
-        <button className="hp-filter-live-btn" onClick={() => onChange({ ...filters, date: todayStr() })}>
-          ● Back to Live
+        <button className="hp-filter-live-btn" onClick={() => onDateChange(todayStr())}
+          style={{ height: 28, fontSize: 11, padding: '0 10px' }}>
+          ● Live
         </button>
       )}
     </div>
@@ -133,27 +125,34 @@ function FilterBar({ filters, onChange }) {
 }
 
 // ══════════════════════════════════════════════════════════════════════
-// STAT CARD — compact, left accent bar, stacked in a column
+// STAT CARD — with optional progress bar
 // ══════════════════════════════════════════════════════════════════════
-function StatCard({ title, value, icon, iconBg, iconColor, accentColor, loading, rate }) {
+function StatCard({ title, value, icon, iconBg, iconColor, accentColor, loading, rate, progress, subtitle }) {
+  const pct = progress != null ? Math.max(0, Math.min(100, isNaN(progress) ? 0 : progress)) : null;
   return (
     <div className="hp-stat-card">
       <div className="hp-stat-accent" style={{ background: accentColor }} />
       <div className="hp-stat-inner">
-        <div>
+        <div style={{ flex: 1, minWidth: 0 }}>
           <div className="hp-stat-title">{title}</div>
           {loading
             ? <div className="hp-stat-shimmer" />
             : <div className="hp-stat-val" style={{ color: accentColor }}>{value}</div>
           }
-          {!loading && rate != null && (
-            <div style={{
-              fontSize: 9, fontFamily: "'JetBrains Mono',monospace",
-              color: rate > 0 ? '#4ade80' : 'var(--text-dim)',
-              marginTop: 3, display: 'flex', alignItems: 'center', gap: 3,
-            }}>
-              <span style={{ fontSize: 8 }}>{rate > 0 ? '▲' : '—'}</span>
-              {rate > 0 ? `+${rate} this week` : '0 this week'}
+          {!loading && rate != null && rate > 0 && (
+            <div className="hp-stat-rate" style={{ color: '#4ade80' }}>
+              <span style={{ fontSize: 9 }}>▲</span>
+              {`+${rate} this week`}
+            </div>
+          )}
+          {!loading && subtitle && (
+            <div className="hp-stat-rate" style={{ color: 'rgba(255,255,255,0.35)' }}>
+              {subtitle}
+            </div>
+          )}
+          {!loading && pct != null && (
+            <div className="hp-stat-progress-wrap">
+              <div className="hp-stat-progress-fill" style={{ width: `${pct}%`, background: accentColor }} />
             </div>
           )}
         </div>
@@ -164,10 +163,142 @@ function StatCard({ title, value, icon, iconBg, iconColor, accentColor, loading,
 }
 
 // ══════════════════════════════════════════════════════════════════════
-// TOP BAND PANELS
+// FIX 3: BATTERY STATUS CARD — bigger donut (90×90), tighter legend
 // ══════════════════════════════════════════════════════════════════════
+function BatteryStatusCard() {
+  const data = [
+    { label: 'High',   pct: 68, color: '#22c55e' },
+    { label: 'Medium', pct: 22, color: '#f59e0b' },
+    { label: 'Low',    pct: 10, color: '#ef4444' },
+  ];
+  // Bigger donut: 90×90, radius 38
+  const CX = 45, CY = 45, R = 38;
+  const toRad = deg => (deg * Math.PI) / 180;
+  let cursor = -90;
+  const slices = data.map(d => {
+    const deg   = (d.pct / 100) * 356;
+    const start = cursor;
+    const end   = start + deg;
+    cursor      = end + 1.5;
+    const large = deg > 180 ? 1 : 0;
+    const x1 = CX + R * Math.cos(toRad(start));
+    const y1 = CY + R * Math.sin(toRad(start));
+    const x2 = CX + R * Math.cos(toRad(end));
+    const y2 = CY + R * Math.sin(toRad(end));
+    return { ...d, path: `M ${CX} ${CY} L ${x1.toFixed(2)} ${y1.toFixed(2)} A ${R} ${R} 0 ${large} 1 ${x2.toFixed(2)} ${y2.toFixed(2)} Z` };
+  });
 
-// Top Devices — packet count = activityData[sn].length (real playback points from /playback API)
+  return (
+    <div className="hp-stat-card hp-battery-card">
+      <div className="hp-stat-accent" style={{ background: '#22c55e' }} />
+      <div className="hp-battery-inner">
+        {/* Bigger SVG: 90×90 (was 80×80) — pushed closer to legend */}
+        <svg width={90} height={90} style={{ flexShrink: 0 }}>
+          {slices.map((s, i) => <path key={i} d={s.path} fill={s.color} opacity={0.92} />)}
+          <text x={CX} y={CY + 4} textAnchor="middle" fontSize={9} fontWeight="700"
+            fill="rgba(255,255,255,0.65)" fontFamily="'JetBrains Mono',monospace">BAT</text>
+        </svg>
+        <div className="hp-battery-legend-col">
+          <div className="hp-stat-title" style={{ marginBottom: 6 }}>Battery Status</div>
+          {data.map(d => (
+            <div key={d.label} className="hp-battery-row">
+              <span className="hp-battery-dot" style={{ background: d.color }} />
+              <span className="hp-battery-lbl">{d.label}</span>
+              <span className="hp-battery-pct" style={{ color: d.color }}>{d.pct}%</span>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ══════════════════════════════════════════════════════════════════════
+// RECENT ACTIVITY CARD — real device data, sorted by latest seen
+// ══════════════════════════════════════════════════════════════════════
+function RecentActivityCard({ devices, locations, activityData, isLive }) {
+  const rows = useMemo(() => {
+    return [...devices]
+      .map(d => {
+        const sn = d.sn ?? '';
+        let lastTs = null;
+
+        if (isLive) {
+          // Live: use real-time location data
+          const loc = locations?.[sn];
+          lastTs = loc?.timestamp ?? loc?.time ?? loc?.locTime
+            ?? d.dataRetrievalTime ?? d.last_seen ?? null;
+        } else {
+          // Historical: derive last seen from the last activity point on that date
+          const pts = activityData?.[sn];
+          if (pts?.length) {
+            const last = pts[pts.length - 1];
+            lastTs = last?.timestamp ?? last?.time ?? last?.locTime ?? null;
+          }
+        }
+
+        const isOnline = isLive
+          ? (d.status === 'online' || (lastTs && (Date.now() - new Date(lastTs).getTime()) < 30 * 60_000))
+          : !!lastTs; // historical: had any activity on that date = active
+
+        return {
+          id:       sn,
+          user:     d.assigned_user_name ?? d.assignedUser ?? d.name ?? '—',
+          status:   isOnline ? 'online' : 'offline',
+          lastSeen: lastTs,
+          ts:       lastTs ? new Date(lastTs).getTime() : 0,
+        };
+      })
+      .filter(r => r.id)
+      .sort((a, b) => b.ts - a.ts)
+      .slice(0, 10);
+  }, [devices, locations, activityData, isLive]);
+
+  const badge = s => s === 'online'
+    ? <span className="hp-badge hp-badge-active">● Active</span>
+    : <span className="hp-badge hp-badge-offline">● Offline</span>;
+
+  return (
+    <div className="hp-card hp-recent-card">
+      <div className="hp-card-header">
+        <span className="hp-card-title">Recent Activity</span>
+        <span className="hp-card-sub">{rows.length} locator{rows.length !== 1 ? 's' : ''}</span>
+      </div>
+      <div className="hp-recent-scroll">
+        <table className="hp-activity-table">
+          <thead>
+            <tr>
+              <th>Device ID</th>
+              <th>User / Label</th>
+              <th style={{ width: 130 }}>Status</th>
+              <th>Last Seen</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.length === 0 ? (
+              <tr>
+                <td colSpan={4} style={{ textAlign: 'center', color: 'var(--text-dim)', padding: '22px 0', fontFamily: "'JetBrains Mono',monospace", fontSize: 12 }}>
+                  No devices loaded
+                </td>
+              </tr>
+            ) : rows.map(row => (
+              <tr key={row.id}>
+                <td className="hp-act-id">{row.id}</td>
+                <td className="hp-act-user">{row.user}</td>
+                <td>{badge(row.status)}</td>
+                <td className="hp-act-time">{fmtRelTime(row.lastSeen)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+// ══════════════════════════════════════════════════════════════════════
+// TOP DEVICES — bar chart (packet count)
+// ══════════════════════════════════════════════════════════════════════
 function TopDevices({ devices, activityData }) {
   const [hovered, setHovered] = useState(null);
   const [dims, setDims]       = useState({ w: 300, h: 180 });
@@ -197,7 +328,7 @@ function TopDevices({ devices, activityData }) {
   const maxP   = ranked[0]?.packets || 1;
   const colors = ['#fbbf24','#a3a3a3','#f97316','#60a5fa','#c084fc'];
 
-  const PAD_L = 88, PAD_R = 36, PAD_T = 8, PAD_B = 8;
+  const PAD_L = 88, PAD_R = 48, PAD_T = 8, PAD_B = 8;
   const { w: W, h: H } = dims;
   const chartW = W - PAD_L - PAD_R;
   const chartH = H - PAD_T - PAD_B;
@@ -223,43 +354,27 @@ function TopDevices({ devices, activityData }) {
                 </linearGradient>
               ))}
             </defs>
-
-            {/* Vertical grid lines */}
             {xTicks.map((f, ti) => {
               const x = PAD_L + f * chartW;
-              return (
-                <line key={ti} x1={x} x2={x} y1={PAD_T} y2={PAD_T + chartH}
-                  stroke="#1f2028" strokeWidth={1} strokeDasharray="3 4" />
-              );
+              return <line key={ti} x1={x} x2={x} y1={PAD_T} y2={PAD_T + chartH} stroke="#dde3ec" strokeWidth={1} strokeDasharray="3 4" />;
             })}
-            <line x1={PAD_L} x2={PAD_L} y1={PAD_T} y2={PAD_T + chartH} stroke="#2e3040" strokeWidth={1} />
-
+            <line x1={PAD_L} x2={PAD_L} y1={PAD_T} y2={PAD_T + chartH} stroke="#b8c4d4" strokeWidth={1} />
             {ranked.map((r, i) => {
               const barW  = Math.max((r.packets / maxP) * chartW, 2);
               const cy    = PAD_T + i * rowH + rowH / 2;
               const isHov = hovered === i;
               const label = (r.name !== r.sn ? r.name : r.sn).replace('CARD-', '');
-              const displayLabel = label.length > 11 ? label.slice(0, 10) + '…' : label;
-
+              const displayLabel = label.length > 13 ? label.slice(0, 12) + '…' : label;
               return (
                 <g key={r.sn} style={{ cursor: 'pointer' }}
                   onMouseEnter={() => setHovered(i)}
                   onMouseLeave={() => setHovered(null)}>
-                  {isHov && (
-                    <rect x={PAD_L} y={PAD_T + i * rowH} width={chartW} height={rowH}
-                      fill="rgba(255,255,255,0.03)" rx={2} />
-                  )}
-                  <rect x={PAD_L} y={cy - barH / 2} width={barW} height={barH}
-                    rx={4} fill={`url(#hbg${i})`}
-                    opacity={isHov ? 1 : 0.82}
-                    style={{ transition: 'opacity 0.15s' }} />
-                  <text x={PAD_L - 6} y={cy + 3.5} textAnchor="end" fontSize={9}
-                    fill={isHov ? '#ffffff' : '#d4d4d8'} fontFamily="'JetBrains Mono',monospace"
-                    style={{ transition: 'fill 0.15s' }}>
+                  {isHov && <rect x={PAD_L} y={PAD_T + i * rowH} width={chartW} height={rowH} fill="rgba(153,27,27,0.06)" rx={2} />}
+                  <rect x={PAD_L} y={cy - barH / 2} width={barW} height={barH} rx={4} fill={`url(#hbg${i})`} opacity={isHov ? 1 : 0.85} style={{ transition: 'opacity 0.15s' }} />
+                  <text x={PAD_L - 6} y={cy + 3.5} textAnchor="end" fontSize={10} fontWeight="600" fill={isHov ? '#fca5a5' : '#8899aa'} fontFamily="'Nunito', sans-serif" style={{ transition: 'fill 0.15s' }}>
                     {displayLabel}
                   </text>
-                  <text x={PAD_L + barW + 5} y={cy + 3.5} textAnchor="start" fontSize={9}
-                    fill={colors[i]} fontFamily="'JetBrains Mono',monospace" fontWeight="700">
+                  <text x={PAD_L + barW + 5} y={cy + 3.5} textAnchor="start" fontSize={9} fill={colors[i]} fontFamily="'JetBrains Mono',monospace" fontWeight="700">
                     {r.packets.toLocaleString()}
                   </text>
                 </g>
@@ -272,7 +387,88 @@ function TopDevices({ devices, activityData }) {
   );
 }
 
-// Top Users — SVG donut showing device count per user
+// ══════════════════════════════════════════════════════════════════════
+// TOP USERS PANEL — progress bar list, derived from devices data
+// ══════════════════════════════════════════════════════════════════════
+function TopUsersPanel({ devices, activityData, isLive }) {
+  const topUsers = useMemo(() => {
+    // Historical: only count users whose devices had activity on the selected date
+    const activeDevices = isLive
+      ? devices
+      : devices.filter(d => (activityData?.[d.sn ?? '']?.length ?? 0) > 0);
+    const map = {};
+    activeDevices.forEach(d => {
+      const u = d.assigned_user_name ?? d.assignedUser ?? d.client ?? null;
+      if (!u) return;
+      map[u] = (map[u] || 0) + 1;
+    });
+    const sorted = Object.entries(map).sort((a, b) => b[1] - a[1]).slice(0, 5);
+    const max = sorted[0]?.[1] || 1;
+    const colors = ['#fbbf24', '#c0c0c0', '#f97316', '#60a5fa', '#c084fc'];
+    return sorted.map(([user, count], i) => ({
+      user, count, pct: Math.round((count / max) * 100), color: colors[i],
+    }));
+  }, [devices]);
+
+  // SVG rank badge — no emoji, inline vector
+  const RankBadge = ({ rank, color }) => (
+    <svg width={26} height={26} viewBox="0 0 26 26" style={{ flexShrink: 0 }}>
+      <circle cx={13} cy={13} r={11.5} fill={`${color}18`} stroke={color} strokeWidth={1.5} strokeOpacity={0.45} />
+      {rank === 1 && (
+        // Crown path for #1
+        <path d="M8 17 L8 12 L10.5 14.5 L13 10 L15.5 14.5 L18 12 L18 17 Z"
+          fill={color} opacity={0.9} />
+      )}
+      {rank === 2 && (
+        // Star for #2
+        <polygon points="13,8 14.2,11.5 18,11.5 15,13.7 16.2,17.2 13,15 9.8,17.2 11,13.7 8,11.5 11.8,11.5"
+          fill={color} opacity={0.85} />
+      )}
+      {rank === 3 && (
+        // Smaller star for #3
+        <polygon points="13,9 13.9,11.7 16.8,11.7 14.5,13.3 15.4,16 13,14.4 10.6,16 11.5,13.3 9.2,11.7 12.1,11.7"
+          fill={color} opacity={0.8} />
+      )}
+      {rank > 3 && (
+        <text x={13} y={17.5} textAnchor="middle" fontSize={11} fontWeight="800"
+          fill={color} fontFamily="'JetBrains Mono',monospace">{rank}</text>
+      )}
+    </svg>
+  );
+
+  return (
+    <div className="hp-card" style={{ display: 'flex', flexDirection: 'column' }}>
+      <div className="hp-card-header">
+        <span className="hp-card-title">Top Users</span>
+        <span style={{ fontSize: 10, color: 'rgba(255,255,255,0.45)', fontFamily: "'Nunito',sans-serif" }}>
+          by assigned locators
+        </span>
+      </div>
+      <div className="hp-panel-body hp-top-users-body">
+        {topUsers.length === 0 ? (
+          <p className="hp-empty-msg">No assigned devices</p>
+        ) : topUsers.map((u, i) => (
+          <div key={u.user} className="hp-rank-row">
+            <RankBadge rank={i + 1} color={u.color} />
+            <div className="hp-rank-body">
+              <div className="hp-rank-header">
+                <span className="hp-rank-name">{u.user}</span>
+                <span className="hp-rank-count" style={{ color: u.color }}>{u.count}</span>
+              </div>
+              <div className="hp-progress-track">
+                <div className="hp-progress-fill" style={{ width: `${u.pct}%`, background: u.color }} />
+              </div>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ══════════════════════════════════════════════════════════════════════
+// USER DEVICE PANEL
+// ══════════════════════════════════════════════════════════════════════
 function UserDevicePanel({ devices }) {
   const [hovered, setHovered] = useState(null);
   const colors = ['#4ade80','#60a5fa','#f97316','#fbbf24','#c084fc','#ec4899','#06b6d4'];
@@ -283,17 +479,17 @@ function UserDevicePanel({ devices }) {
     devices.forEach(d => {
       const u = d.assignedUser ?? d.client ?? d.name ?? 'Unassigned';
       if (!map[u]) map[u] = [];
-      map[u].push(d.sn ?? '');
+      map[u].push({ sn: d.sn ?? '', name: d.name ?? d.assignedUser ?? d.sn ?? '' });
     });
     const userDevices = Object.entries(map).sort((a, b) => b[1].length - a[1].length);
-    const total = userDevices.reduce((s, [, sns]) => s + sns.length, 0);
+    const total = userDevices.reduce((s, [, devs]) => s + devs.length, 0);
     if (total === 0) return { userDevices, slices: [] };
 
     const CX = 85, CY = 85, R = 78, GAP = 1.2;
     const toRad = deg => (deg * Math.PI) / 180;
     let cursor = -90;
-    const slices = userDevices.slice(0, 5).map(([user, sns], i) => {
-      const count = sns.length;
+    const slices = userDevices.slice(0, 5).map(([user, devs], i) => {
+      const count = devs.length;
       const deg   = (count / total) * (360 - Math.min(userDevices.length, 5) * GAP);
       const start = cursor;
       const end   = start + deg;
@@ -319,19 +515,18 @@ function UserDevicePanel({ devices }) {
   const CX = 85, CY = 85;
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', minWidth: 0, flex: '1 1 320px', maxWidth: 500 }}>
+    <div className="hp-card" style={{ display: 'flex', flexDirection: 'column', minWidth: 0, flex: '1 1 320px', maxWidth: 500 }}>
       <div className="hp-card-header">
         <span className="hp-card-title">Users / Department &amp; Devices</span>
-        <span style={{ fontSize: 9, color: 'var(--text-muted)', fontFamily: "'JetBrains Mono',monospace" }}>
+        <span style={{ fontSize: 9, color: 'var(--text-muted)', fontFamily: "'Nunito',sans-serif" }}>
           {devices.length} total
         </span>
       </div>
       <div style={{ display: 'flex', gap: 8, flex: 1, minHeight: 0, padding: '6px 10px 10px' }}>
-        {/* Left: pie chart */}
-        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8, flexShrink: 0 }}>
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6, flexShrink: 0 }}>
           <svg width={170} height={170}>
             {slices.length === 0
-              ? <circle cx={CX} cy={CY} r={78} fill="#1f2028" strokeDasharray="5 4" />
+              ? <circle cx={CX} cy={CY} r={78} fill="#1e1e28" strokeDasharray="5 4" />
               : slices.map((s, i) => (
                 <path key={s.user} d={s.path}
                   fill={s.color}
@@ -362,41 +557,45 @@ function UserDevicePanel({ devices }) {
                 onMouseEnter={() => setHovered(i)}
                 onMouseLeave={() => setHovered(null)}>
                 <div style={{ width: 7, height: 7, borderRadius: 2, flexShrink: 0, background: s.color }} />
-                <span style={{ fontSize: 9, fontFamily: "'JetBrains Mono',monospace", color: 'var(--text)',
-                  maxWidth: 80, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                <span style={{ fontSize: 10, fontFamily: "'Nunito', sans-serif", color: 'var(--text)', fontWeight: 600,
+                  maxWidth: 75, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                   {s.user}
                 </span>
-                <span style={{ fontSize: 9, fontFamily: "'JetBrains Mono',monospace", color: s.color, fontWeight: 700 }}>
+                <span style={{ fontSize: 10, fontFamily: "'Nunito', sans-serif", color: s.color, fontWeight: 700 }}>
                   {s.count}
                 </span>
               </div>
             ))}
           </div>
         </div>
-        {/* Right: per-user device list */}
         <div className="hp-dpu-body" style={{ flex: 1, minWidth: 0 }}>
           {userDevices.length === 0
-            ? <p className="hp-empty-msg">No devices</p>
-            : userDevices.map(([user, sns], i) => {
+            ? <p className="hp-empty-msg">No locators</p>
+            : userDevices.map(([user, devs], i) => {
               const color = colors[i % colors.length];
               return (
                 <div key={user} className="hp-dpu-row">
                   <div className="hp-dpu-user-row">
                     <div className="hp-user-avatar" style={{
-                      width: 22, height: 22, fontSize: 7,
+                      width: 20, height: 20, fontSize: 7,
                       background: `${color}18`, color,
                       border: `1px solid ${color}30`,
                     }}>{ini(user)}</div>
                     <span className="hp-dpu-username">{user}</span>
-                    <span className="hp-dpu-count" style={{ color }}>{sns.length}</span>
+                    <span className="hp-dpu-count" style={{ color }}>{devs.length}</span>
                   </div>
                   <div className="hp-dpu-chips">
-                    {sns.map(sn => (
-                      <span key={sn} className="hp-dpu-chip"
-                        style={{ borderColor: `${color}35`, color: 'var(--text-muted)' }}>
-                        {sn.replace('CARD-', '')}
-                      </span>
-                    ))}
+                    {devs.map(dev => {
+                      const displayName = (dev.name && dev.name !== dev.sn)
+                        ? dev.name
+                        : dev.sn.replace('CARD-', '');
+                      return (
+                        <span key={dev.sn} className="hp-dpu-chip"
+                          style={{ borderColor: `${color}35`, color: 'var(--text-muted)' }}>
+                          {displayName}
+                        </span>
+                      );
+                    })}
                   </div>
                 </div>
               );
@@ -408,205 +607,158 @@ function UserDevicePanel({ devices }) {
 }
 
 // ══════════════════════════════════════════════════════════════════════
-// REGISTRATIONS DONUT — compact pie, each slice = one month
-// Source: devices[].bindTime — no extra API call
+// BOUND DEVICES CHART
 // ══════════════════════════════════════════════════════════════════════
-function RegistrationsDonut({ devices, selectedDate }) {
-  const [hovered, setHovered] = useState(null);
+function BoundDevicesChart({ devices, selectedDate }) {
+  const [hovered, setHovered]         = useState(null);
+  const [dims, setDims]               = useState({ w: 400, h: 140 });
+  const [tooltipRect, setTooltipRect] = useState(null);
+  const wrapRef = useRef(null);
+  const svgRef  = useRef(null);
 
-  const COLORS = [
-    '#6366f1','#f43f5e','#f97316','#facc15',
-    '#4ade80','#22d3ee','#e879f9','#60a5fa',
-  ];
+  useEffect(() => {
+    if (!wrapRef.current) return;
+    const ro = new ResizeObserver(([entry]) => {
+      const { width, height } = entry.contentRect;
+      setDims({ w: Math.max(width, 100), h: Math.max(height, 80) });
+    });
+    ro.observe(wrapRef.current);
+    return () => ro.disconnect();
+  }, []);
 
-  const { slices, total } = useMemo(() => {
-    // Use the selected date as reference so historical views show the right months
-    const now = selectedDate ? new Date(selectedDate + 'T00:00:00') : new Date();
-    const todayStr = new Date().toISOString().slice(0, 10);
-    const isHistorical = selectedDate && selectedDate !== todayStr;
+  const { getMergedBindings } = useBindCache();
 
-    let months;
-    if (isHistorical) {
-      // Single bucket: only the month of the selected date
-      months = [{
-        key:   `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`,
-        label: now.toLocaleDateString('en-US', { month: 'short', year: '2-digit' }),
+  const { months, total } = useMemo(() => {
+    const now = selectedDate ? new Date(selectedDate + 'T23:59:59') : new Date();
+    const months = [];
+    for (let i = 7; i >= 0; i--) {
+      const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+      months.push({
+        key:   `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`,
+        label: d.toLocaleDateString('en-US', { month: 'short', year: '2-digit' }),
         count: 0,
-        color: COLORS[0],
-      }];
-    } else {
-      // Rolling 8-month window ending at now
-      months = [];
-      for (let i = 7; i >= 0; i--) {
-        const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
-        months.push({
-          key:   `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`,
-          label: d.toLocaleDateString('en-US', { month: 'short', year: '2-digit' }),
-          count: 0,
-          color: COLORS[i % COLORS.length],
-        });
-      }
+      });
     }
-
     const map = Object.fromEntries(months.map(m => [m.key, m]));
-    devices.forEach(d => {
-      // Only count devices that are bound (assigned to a user)
-      if (!d.assigned_user_id && !d.user_id) return;
-      const raw = d.bindTime ?? d.bound_at ?? d.createdAt ?? null;
-      if (!raw) return;
-      const dt = new Date(raw);
-      if (isNaN(dt)) return;
-      // Don't count binds that happened after the selected date
-      if (dt > now) return;
+    const allBindings = getMergedBindings(devices);
+    allBindings.forEach(bindTime => {
+      const dt = new Date(bindTime);
+      if (isNaN(dt) || dt > now) return;
       const key = `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}`;
       if (map[key]) map[key].count++;
     });
+    const total = months.reduce((s, m) => s + m.count, 0);
+    return { months, total };
+  }, [devices, selectedDate, getMergedBindings]);
 
-    const active = months.filter(m => m.count > 0);
-    const total  = active.reduce((s, m) => s + m.count, 0);
-    if (total === 0) return { slices: months.map(m => ({ ...m, pct: 0, path: '' })), total: 0 };
+  const { w: W, h: H } = dims;
+  const PAD = { top: 12, right: 18, bottom: 28, left: 30 };
+  const innerW = W - PAD.left - PAD.right;
+  const innerH = H - PAD.top - PAD.bottom;
+  const maxCount = Math.max(...months.map(m => m.count), 1);
+  const selectedKey = selectedDate ? selectedDate.slice(0, 7) : new Date().toISOString().slice(0, 7);
 
-    // Build arcs
-    const CX = 65, CY = 65, R = 54, INNER = 34, GAP = 1.8;
-    const toRad = deg => (deg * Math.PI) / 180;
-    let cursor  = -90;
+  const pts = months.map((m, i) => ({
+    ...m,
+    x: PAD.left + (i / (months.length - 1)) * innerW,
+    y: PAD.top + innerH - (m.count / maxCount) * innerH,
+  }));
 
-    const slices = active.map(m => {
-      const deg   = (m.count / total) * (360 - active.length * GAP);
-      const start = cursor;
-      const end   = start + deg;
-      cursor      = end + GAP;
+  const polyline = pts.map(p => `${p.x},${p.y}`).join(' ');
+  const area = [
+    `${pts[0].x},${PAD.top + innerH}`,
+    ...pts.map(p => `${p.x},${p.y}`),
+    `${pts[pts.length - 1].x},${PAD.top + innerH}`,
+  ].join(' ');
 
-      const large = deg > 180 ? 1 : 0;
-      const x1  = CX + R * Math.cos(toRad(start));
-      const y1  = CY + R * Math.sin(toRad(start));
-      const x2  = CX + R * Math.cos(toRad(end));
-      const y2  = CY + R * Math.sin(toRad(end));
-      const xi1 = CX + INNER * Math.cos(toRad(start));
-      const yi1 = CY + INNER * Math.sin(toRad(start));
-      const xi2 = CX + INNER * Math.cos(toRad(end));
-      const yi2 = CY + INNER * Math.sin(toRad(end));
-
-      return {
-        ...m,
-        pct:  m.count / total,
-        path: `M ${x1} ${y1} A ${R} ${R} 0 ${large} 1 ${x2} ${y2} L ${xi2} ${yi2} A ${INNER} ${INNER} 0 ${large} 0 ${xi1} ${yi1} Z`,
-        CX, CY,
-      };
-    });
-
-    return { slices, total };
-  }, [devices]);
-
-  const hovSlice = hovered ? slices.find(s => s.key === hovered) : null;
-  const CX = 65, CY = 65;
+  const handlePointEnter = useCallback((p) => {
+    setHovered(p.key);
+    setTooltipRect({ x: p.x, y: p.y, label: p.label, count: p.count, key: p.key });
+  }, []);
 
   return (
-    <div className="hp-donut-bare">
+    <div className="hp-card hp-donut-bare">
       <div className="hp-card-header">
         <span className="hp-card-title">Bound Devices / Month</span>
-        <span style={{ fontSize: 9, color: 'var(--text-muted)', fontFamily: "'JetBrains Mono',monospace" }}>
+        <span style={{ fontSize: 10, color: 'var(--text-muted)', fontFamily: "'Nunito', sans-serif", fontWeight: 600 }}>
           {total} bound
         </span>
       </div>
-
-      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10, padding: '10px 12px 12px', flex: 1 }}>
-
-        {/* Donut */}
-        <svg width={130} height={130} style={{ flexShrink: 0 }}>
-          {/* bg ring */}
-          <circle cx={CX} cy={CY} r={44} fill="none" stroke="#1f2028" strokeWidth={20} />
-
-          {total === 0 ? (
-            <circle cx={CX} cy={CY} r={44} fill="none"
-              stroke="#2e3040" strokeWidth={20} strokeDasharray="5 4" />
-          ) : slices.map(s => (
-            <path key={s.key} d={s.path}
-              fill={s.color}
-              opacity={hovered === null ? 0.88 : hovered === s.key ? 1 : 0.18}
-              style={{
-                cursor: 'pointer',
-                transition: 'opacity 0.15s, filter 0.15s',
-                filter: hovered === s.key ? `drop-shadow(0 0 5px ${s.color})` : 'none',
-              }}
-              onMouseEnter={() => setHovered(s.key)}
-              onMouseLeave={() => setHovered(null)}
-            />
-          ))}
-
-          {/* Center text */}
-          <text x={CX} y={CY - 5} textAnchor="middle"
-            fontSize={hovSlice ? 11 : 14} fontWeight="700"
-            fill={hovSlice ? hovSlice.color : '#e8eaf0'}
-            fontFamily="'JetBrains Mono',monospace"
-            style={{ transition: 'fill 0.15s' }}>
-            {hovSlice ? hovSlice.count : total || '—'}
-          </text>
-          <text x={CX} y={CY + 8} textAnchor="middle"
-            fontSize={7} fill="#9ca3af" fontFamily="'JetBrains Mono',monospace">
-            {hovSlice ? hovSlice.label : 'devices'}
-          </text>
-        </svg>
-
-        {/* Legend — horizontal wrap below donut */}
-        <div style={{
-          width: '100%', display: 'flex',
-          flexWrap: 'wrap', gap: '4px 10px',
-          justifyContent: 'center',
-          maxHeight: 72, overflowY: 'auto',
-        }}>
-          {slices.map(s => (
-            <div key={s.key}
-              style={{
-                display: 'flex', alignItems: 'center', gap: 6,
-                cursor: 'pointer',
-                opacity: hovered === null ? 1 : hovered === s.key ? 1 : 0.3,
-                transition: 'opacity 0.15s',
-              }}
-              onMouseEnter={() => setHovered(s.key)}
-              onMouseLeave={() => setHovered(null)}
-            >
+      <div ref={wrapRef} style={{ flex: 1, position: 'relative', minHeight: 100, overflow: 'visible' }}>
+        {total === 0 ? (
+          <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <span style={{ fontSize: 11, color: 'var(--text-muted)', fontFamily: "'Nunito', sans-serif" }}>No bind dates found</span>
+          </div>
+        ) : (
+          <>
+            <svg ref={svgRef} width={W} height={H} style={{ display: 'block', position: 'absolute', inset: 0, overflow: 'visible' }}>
+              <defs>
+                <linearGradient id="bound-area-grad" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0%" stopColor="rgba(153,27,27,0.30)" />
+                  <stop offset="100%" stopColor="rgba(153,27,27,0.02)" />
+                </linearGradient>
+              </defs>
+              <polygon points={area} fill="url(#bound-area-grad)" />
+              <polyline points={polyline} fill="none" stroke="#991b1b" strokeWidth={2} strokeLinejoin="round" />
+              {[...new Set([0, 0.5, 1].map(f => Math.round(f * maxCount)))].map(val => {
+                const frac = maxCount > 0 ? val / maxCount : 0;
+                const y = PAD.top + innerH - frac * innerH;
+                return (
+                  <g key={val}>
+                    <line x1={PAD.left} y1={y} x2={PAD.left + innerW} y2={y} stroke="rgba(255,255,255,0.07)" strokeWidth={1} strokeDasharray="3 3" />
+                    <text x={PAD.left - 4} y={y + 4} textAnchor="end" fontSize={9} fill="rgba(255,255,255,0.45)" fontFamily="'JetBrains Mono',monospace">
+                      {val}
+                    </text>
+                  </g>
+                );
+              })}
+              {pts.map((p, idx) => {
+                const isSelected = p.key === selectedKey;
+                const isHov      = hovered === p.key;
+                return (
+                  <g key={p.key}
+                    onMouseEnter={() => handlePointEnter(p)}
+                    onMouseLeave={() => { setHovered(null); setTooltipRect(null); }}
+                    style={{ cursor: 'pointer' }}>
+                    <rect x={p.x - 14} y={PAD.top} width={28} height={innerH + PAD.bottom} fill="transparent" />
+                    <circle cx={p.x} cy={p.y} r={isHov ? 6 : isSelected ? 5 : 4}
+                      fill={isSelected ? '#f59e0b' : '#991b1b'}
+                      stroke={isHov ? '#fff' : 'none'} strokeWidth={1.5}
+                      style={{ transition: 'r 0.1s' }} />
+                    {(idx % 2 === 0 || isSelected) && (
+                      <text x={p.x} y={H - 4} textAnchor="middle" fontSize={8}
+                        fill={isSelected ? '#f59e0b' : '#64748b'} fontFamily="'JetBrains Mono',monospace">
+                        {p.label.split(' ')[0]}
+                      </text>
+                    )}
+                  </g>
+                );
+              })}
+            </svg>
+            {tooltipRect && (
               <div style={{
-                width: 8, height: 8, borderRadius: 2, flexShrink: 0,
-                background: s.color,
-                boxShadow: hovered === s.key ? `0 0 6px ${s.color}` : 'none',
-                transition: 'box-shadow 0.15s',
-              }} />
-              <span style={{
-                fontSize: 10, fontFamily: "'JetBrains Mono',monospace",
-                color: 'var(--text)', flex: 1, minWidth: 0,
-                overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-              }}>{s.label}</span>
-              <span style={{
-                fontSize: 9, fontFamily: "'JetBrains Mono',monospace",
-                color: s.color, flexShrink: 0, fontWeight: 700,
-              }}>{s.count}</span>
-            </div>
-          ))}
-          {total === 0 && (
-            <span style={{ fontSize: 10, color: 'var(--text-muted)', fontFamily: "'JetBrains Mono',monospace" }}>
-              No bind dates found
-            </span>
-          )}
-        </div>
+                position: 'absolute',
+                left: Math.min(Math.max(tooltipRect.x - 30, 2), W - PAD.right - 62),
+                top: tooltipRect.y > PAD.top + 50 ? tooltipRect.y - 52 : tooltipRect.y + 14,
+                pointerEvents: 'none', zIndex: 9999,
+                background: '#1a2535', border: '1px solid #2e3a4e', borderRadius: 6,
+                padding: '4px 8px', minWidth: 60, textAlign: 'center',
+                boxShadow: '0 4px 12px rgba(0,0,0,0.35)',
+              }}>
+                <div style={{ fontSize: 8, color: '#94a3b8', fontFamily: "'JetBrains Mono',monospace" }}>{tooltipRect.label}</div>
+                <div style={{ fontSize: 13, color: '#f59e0b', fontWeight: 700, fontFamily: "'JetBrains Mono',monospace" }}>{tooltipRect.count}</div>
+              </div>
+            )}
+          </>
+        )}
       </div>
     </div>
   );
 }
 
 // ══════════════════════════════════════════════════════════════════════
-// SIDEBAR
-// ══════════════════════════════════════════════════════════════════════
-
-
-// Devices Per User — direct map from devices array, capped + scrollable
-
-// ══════════════════════════════════════════════════════════════════════
-// ACTIVITY CHART
-// ══════════════════════════════════════════════════════════════════════
 // REGION BREACH PANEL
 // ══════════════════════════════════════════════════════════════════════
-
 function RegionBreachPanel({ breaches, totalWithRegion }) {
   const fmtTs = (ts) => {
     if (!ts) return '—';
@@ -615,19 +767,14 @@ function RegionBreachPanel({ breaches, totalWithRegion }) {
       return isNaN(d) ? '—' : d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', second: '2-digit' });
     } catch { return '—'; }
   };
-
   return (
     <div className="hp-card" style={{ flex: 1, minHeight: 0, overflow: 'hidden' }}>
       <div className="hp-card-header">
         <span className="hp-card-title">Region Breaches</span>
-        <span style={{
-          fontSize: 10, fontFamily: "'JetBrains Mono',monospace", fontWeight: 700,
-          color: breaches.length > 0 ? '#f97316' : '#4ade80',
-        }}>
+        <span style={{ fontSize: 10, fontFamily: "'Nunito',sans-serif", fontWeight: 700, color: breaches.length > 0 ? '#f97316' : '#4ade80' }}>
           {breaches.length > 0 ? `${breaches.length} out` : totalWithRegion > 0 ? '✓ all in' : 'no regions'}
         </span>
       </div>
-
       {totalWithRegion === 0 ? (
         <p style={{ fontSize: 11, color: 'var(--text-muted)', padding: '8px 12px', margin: 0 }}>
           Assign regions to devices to enable breach detection.
@@ -635,30 +782,25 @@ function RegionBreachPanel({ breaches, totalWithRegion }) {
       ) : breaches.length === 0 ? (
         <div style={{ padding: '10px 12px', display: 'flex', alignItems: 'center', gap: 8 }}>
           <span style={{ width: 8, height: 8, borderRadius: '50%', background: '#4ade80', display: 'inline-block', flexShrink: 0 }} />
-          <span style={{ fontSize: 11, color: '#4ade80' }}>All {totalWithRegion} tracked device{totalWithRegion !== 1 ? 's' : ''} in region</span>
+          <span style={{ fontSize: 11, color: '#4ade80' }}>All {totalWithRegion} tracked locator{totalWithRegion !== 1 ? 's' : ''} in region</span>
         </div>
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 0, flex: 1, overflowY: 'auto' }}>
-          {breaches.map((b, i) => (
-            <div key={b.sn} style={{
-              padding: '7px 12px', borderBottom: '1px solid #1a1a1f',
-              display: 'flex', flexDirection: 'column', gap: 2,
-            }}>
+          {breaches.map((b) => (
+            <div key={b.sn} style={{ padding: '7px 12px', borderBottom: '1px solid rgba(255,255,255,0.05)', display: 'flex', flexDirection: 'column', gap: 2 }}>
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6 }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
                   <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#f97316', flexShrink: 0 }} />
-                  <span style={{ fontSize: 12, color: '#e4e4e7', fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  <span style={{ fontSize: 12, color: 'var(--text)', fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                     {b.name !== b.sn ? b.name : b.sn}
                   </span>
                 </div>
-                <span style={{ fontSize: 9, color: '#52525b', fontFamily: "'JetBrains Mono',monospace", flexShrink: 0 }}>
+                <span style={{ fontSize: 9, color: 'var(--text-dim)', fontFamily: "'Nunito',sans-serif", flexShrink: 0 }}>
                   {fmtTs(b.ts)}
                 </span>
               </div>
               <div style={{ paddingLeft: 12, display: 'flex', gap: 6, alignItems: 'center' }}>
-                {b.name !== b.sn && (
-                  <span style={{ fontSize: 9, color: '#52525b', fontFamily: "'JetBrains Mono',monospace" }}>{b.sn}</span>
-                )}
+                {b.name !== b.sn && <span style={{ fontSize: 9, color: 'var(--text-dim)', fontFamily: "'Nunito',sans-serif" }}>{b.sn}</span>}
                 <span style={{ fontSize: 10, color: '#f97316', background: 'rgba(249,115,22,0.1)', border: '1px solid rgba(249,115,22,0.2)', borderRadius: 4, padding: '1px 5px' }}>
                   outside {b.region}
                 </span>
@@ -672,7 +814,8 @@ function RegionBreachPanel({ breaches, totalWithRegion }) {
 }
 
 // ══════════════════════════════════════════════════════════════════════
-
+// ACTIVITY CHART — FIX 2: unified maroon in gradients
+// ══════════════════════════════════════════════════════════════════════
 function ActivityChart({ activityData, devices, selectedDate, isLive, mode, onModeChange, loading, lastSync }) {
   const [hovered, setHovered] = useState(null);
   const [dims, setDims]       = useState({ w: 600, h: 240 });
@@ -708,16 +851,14 @@ function ActivityChart({ activityData, devices, selectedDate, isLive, mode, onMo
         if (!ts) return;
         const d = new Date(ts);
         if (isNaN(d)) return;
-        const h = d.getHours(); // PKT local time
+        const h = d.getHours();
         devHour[sn][h] = (devHour[sn][h] || 0) + 1;
       });
     });
-
     const generalBins = hours.map(h => ({
       hour: h,
       count: Object.values(devHour).reduce((s, hc) => s + (hc[h] ?? 0), 0),
     }));
-
     const deviceBins = hours.map(h => {
       let cum = 0;
       const segments = deviceList.map(({ sn, color }) => {
@@ -728,7 +869,6 @@ function ActivityChart({ activityData, devices, selectedDate, isLive, mode, onMo
       });
       return { hour: h, total: cum, segments };
     });
-
     return { generalBins, deviceBins };
   }, [activityData, deviceList, hours]);
 
@@ -739,41 +879,32 @@ function ActivityChart({ activityData, devices, selectedDate, isLive, mode, onMo
   const tickMax  = ticks[ticks.length - 1];
   const totalPts = generalBins.reduce((s, b) => s + b.count, 0);
   const hasData  = Object.keys(activityData).length > 0;
+  const peakBin  = hasData ? generalBins.reduce((best, b) => b.count > best.count ? b : best, generalBins[0]) : null;
+  const syncStr  = lastSync ? lastSync.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit' }) : null;
 
-  const peakBin = hasData
-    ? generalBins.reduce((best, b) => b.count > best.count ? b : best, generalBins[0])
-    : null;
-
-  const syncStr = lastSync
-    ? lastSync.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit' })
-    : null;
-
-  const PAD_L = 38, PAD_R = 14, PAD_T = 12, PAD_B = 22;
+  const PAD_L = 40, PAD_R = 14, PAD_T = 12, PAD_B = 22;
   const { w: W, h: H } = dims;
   const chartW    = W - PAD_L - PAD_R;
   const chartH    = H - PAD_T - PAD_B;
   const barGroupW = chartW / Math.max(hours.length, 1);
-  const barW      = Math.max(barGroupW * 0.72, 2);
+  const barW      = Math.max(barGroupW * 0.5, 2);
 
   return (
     <div className="hp-activity-card">
       <div className="hp-card-header">
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-          <span className="hp-card-title">Device Activity — {selectedDate}</span>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <span className="hp-card-title">Locator Activity — {selectedDate}</span>
           {loading && <span className="hp-spinner-inline" />}
-          {!loading && syncStr && (
-            <span style={{ fontSize: 9, color: 'var(--text-dim)', fontFamily: "'JetBrains Mono',monospace" }}>↻ {syncStr}</span>
-          )}
           {!loading && hasData && (
-            <span style={{ fontSize: 9, color: 'var(--text-muted)', fontFamily: "'JetBrains Mono',monospace" }}>
+            <span style={{ fontSize: 9, color: 'var(--text-muted)', fontFamily: "'Nunito',sans-serif" }}>
               {totalPts.toLocaleString()} pts · {Object.keys(activityData).length} dev
               {peakBin?.count > 0 && (
-                <span style={{ color: '#f59e0b', marginLeft: 8 }}>▲ peak {fmtHour(peakBin.hour)}:00</span>
+                <span style={{ color: '#f59e0b', marginLeft: 6 }}>▲ peak {fmtHour(peakBin.hour)}:00</span>
               )}
             </span>
           )}
         </div>
-        <div style={{ display: 'flex', gap: 6 }}>
+        <div style={{ display: 'flex', gap: 5 }}>
           <button className={`hp-mode-btn${mode === 'general' ? ' active' : ''}`} onClick={() => onModeChange('general')}>Overview</button>
           <button className={`hp-mode-btn${mode === 'device'  ? ' active' : ''}`} onClick={() => onModeChange('device')}>Per Device</button>
           <button className={`hp-mode-btn${mode === 'trend'   ? ' active' : ''}`} onClick={() => onModeChange('trend')}>Trend</button>
@@ -789,36 +920,36 @@ function ActivityChart({ activityData, devices, selectedDate, isLive, mode, onMo
         ) : !hasData ? (
           <div className="hp-chart-empty">No data for {selectedDate}</div>
         ) : (
-          <svg width={W} height={H} style={{ display: 'block', position: 'absolute', inset: 0 }}>
+          <svg width={W} height={H} style={{ display: 'block', position: 'absolute', inset: 0, overflow: 'visible' }}>
             <defs>
+              {/* FIX 2: unified maroon #991b1b in both gradients */}
               <linearGradient id="bar-grad-default" x1="0" y1="0" x2="0" y2="1">
-                <stop offset="0%" stopColor="#cc2222" />
-                <stop offset="100%" stopColor="#800000" />
+                <stop offset="0%" stopColor="#b91c1c" />
+                <stop offset="100%" stopColor="#991b1b" />
               </linearGradient>
               <linearGradient id="bar-grad-hover" x1="0" y1="0" x2="0" y2="1">
-                <stop offset="0%" stopColor="#ef4444" />
-                <stop offset="100%" stopColor="#aa1111" />
+                <stop offset="0%" stopColor="#dc2626" />
+                <stop offset="100%" stopColor="#b91c1c" />
               </linearGradient>
               <linearGradient id="trend-area-grad" x1="0" y1="0" x2="0" y2="1">
-                <stop offset="0%" stopColor="rgba(204,34,34,0.3)" />
-                <stop offset="100%" stopColor="rgba(204,34,34,0)" />
+                <stop offset="0%" stopColor="rgba(185,28,28,0.35)" />
+                <stop offset="100%" stopColor="rgba(185,28,28,0)" />
               </linearGradient>
             </defs>
 
-            {/* Y-axis grid lines (dashed) */}
             {ticks.map(tick => {
               const y = PAD_T + chartH * (1 - (tickMax > 0 ? tick / tickMax : 0));
               return (
                 <g key={`t-${tick}`}>
-                  <line x1={PAD_L} x2={W - PAD_R} y1={y} y2={y} stroke="#1f2028" strokeWidth={1} strokeDasharray="3 4" />
-                  <text x={PAD_L - 5} y={y + 3.5} textAnchor="end" fontSize={9} fill="#ffffff" fontFamily="'JetBrains Mono',monospace">{fmtVal(tick)}</text>
+                  <line x1={PAD_L} x2={W - PAD_R} y1={y} y2={y} stroke="#dde3ec" strokeWidth={1} strokeDasharray="3 4" />
+                  <text x={PAD_L - 5} y={y + 3.5} textAnchor="end" fontSize={9} fill="#374151" fontFamily="'JetBrains Mono',monospace">{fmtVal(tick)}</text>
                 </g>
               );
             })}
-            <line x1={PAD_L} x2={PAD_L}     y1={PAD_T} y2={PAD_T + chartH} stroke="#2e3040" strokeWidth={1} />
-            <line x1={PAD_L} x2={W - PAD_R} y1={PAD_T + chartH} y2={PAD_T + chartH} stroke="#2e3040" strokeWidth={1} />
+            <line x1={PAD_L} x2={PAD_L}     y1={PAD_T} y2={PAD_T + chartH} stroke="#b8c4d4" strokeWidth={1} />
+            <line x1={PAD_L} x2={W - PAD_R} y1={PAD_T + chartH} y2={PAD_T + chartH} stroke="#b8c4d4" strokeWidth={1} />
 
-            {/* ── TREND MODE ── */}
+            {/* TREND MODE */}
             {mode === 'trend' && (() => {
               const linePoints = hours.map((h, i) => {
                 const count = generalBins[i]?.count ?? 0;
@@ -833,7 +964,7 @@ function ActivityChart({ activityData, devices, selectedDate, isLive, mode, onMo
               return (
                 <g>
                   {areaD  && <path d={areaD} fill="url(#trend-area-grad)" />}
-                  {polyPts && <polyline points={polyPts} fill="none" stroke="#cc2222" strokeWidth={2} strokeLinejoin="round" />}
+                  {polyPts && <polyline points={polyPts} fill="none" stroke="#991b1b" strokeWidth={2} strokeLinejoin="round" />}
                   {linePoints.map((p) => {
                     const isHov  = hovered === p.h;
                     const isPeak = peakBin?.hour === p.h && p.count > 0;
@@ -843,14 +974,13 @@ function ActivityChart({ activityData, devices, selectedDate, isLive, mode, onMo
                         onMouseEnter={() => setHovered(p.h)}
                         onMouseLeave={() => setHovered(null)}>
                         <rect x={p.x - barGroupW / 2} y={PAD_T} width={barGroupW} height={chartH + PAD_B} fill="transparent" />
-                        {isHov && <line x1={p.x} x2={p.x} y1={PAD_T} y2={PAD_T + chartH} stroke="#2e3040" strokeWidth={1} strokeDasharray="3 3" />}
+                        {isHov && <line x1={p.x} x2={p.x} y1={PAD_T} y2={PAD_T + chartH} stroke="#c0c8d8" strokeWidth={1} strokeDasharray="3 3" />}
                         <circle cx={p.x} cy={p.y} r={isHov || isPeak ? 5 : 3}
-                          fill={isPeak ? '#f59e0b' : isHov ? '#ef4444' : '#cc2222'}
+                          fill={isPeak ? '#f59e0b' : isHov ? '#dc2626' : '#991b1b'}
                           stroke={isHov ? '#e8eaf0' : 'none'} strokeWidth={1.5}
                           style={{ transition: 'r 0.12s, fill 0.12s' }} />
                         {showLbl && (
-                          <text x={p.x} y={H - 5} textAnchor="middle" fontSize={8}
-                            fill={isHov ? '#e8eaf0' : '#ffffff'} fontFamily="'JetBrains Mono',monospace">
+                          <text x={p.x} y={H - 5} textAnchor="middle" fontSize={8} fill={isHov ? '#fca5a5' : '#374151'} fontFamily="'JetBrains Mono',monospace">
                             {fmtHour(p.h)}
                           </text>
                         )}
@@ -860,12 +990,11 @@ function ActivityChart({ activityData, devices, selectedDate, isLive, mode, onMo
                           const tipY = Math.max(PAD_T + 2, p.y - tipH - 10);
                           return (
                             <g style={{ pointerEvents: 'none' }}>
-                              <rect x={tipX} y={tipY} width={tipW} height={tipH} rx={6}
-                                fill="rgba(7,8,10,0.97)" stroke="#2e3040" strokeWidth={1} />
+                              <rect x={tipX} y={tipY} width={tipW} height={tipH} rx={6} fill="rgba(7,8,10,0.97)" stroke="#2e3040" strokeWidth={1} />
                               <text x={tipX + tipW/2} y={tipY + 13} textAnchor="middle" fontSize={9} fill="#9ca3af" fontFamily="'JetBrains Mono',monospace">
                                 {fmtHour(p.h)}:00 PKT
                               </text>
-                              <text x={tipX + tipW/2} y={tipY + 29} textAnchor="middle" fontSize={12} fontWeight="700" fill="#cc2222" fontFamily="'JetBrains Mono',monospace">
+                              <text x={tipX + tipW/2} y={tipY + 29} textAnchor="middle" fontSize={12} fontWeight="700" fill="#b91c1c" fontFamily="'JetBrains Mono',monospace">
                                 {p.count.toLocaleString()} pts
                               </text>
                             </g>
@@ -878,7 +1007,7 @@ function ActivityChart({ activityData, devices, selectedDate, isLive, mode, onMo
               );
             })()}
 
-            {/* ── BAR MODES (general + device) ── */}
+            {/* BAR MODES */}
             {mode !== 'trend' && hours.map((h, i) => {
               const groupX  = PAD_L + i * barGroupW + barGroupW / 2;
               const isHov   = hovered === h;
@@ -892,17 +1021,11 @@ function ActivityChart({ activityData, devices, selectedDate, isLive, mode, onMo
                 return (
                   <g key={h} style={{ cursor: 'pointer' }}
                     onMouseEnter={() => setHovered(h)} onMouseLeave={() => setHovered(null)}>
-                    {isHov && (
-                      <rect x={groupX - barGroupW / 2} y={PAD_T} width={barGroupW} height={chartH}
-                        fill="rgba(255,255,255,0.03)" />
-                    )}
+                    {isHov && <rect x={groupX - barGroupW / 2} y={PAD_T} width={barGroupW} height={chartH} fill="rgba(153,27,27,0.06)" />}
                     <rect x={groupX - barGroupW / 2} y={PAD_T} width={barGroupW} height={chartH + PAD_B} fill="transparent" />
-                    <rect x={groupX - barW / 2} y={PAD_T + chartH - barH} width={barW} height={barH} rx={3}
-                      fill={fill} opacity={isHov || isPeak ? 1 : 0.82}
-                      style={{ transition: 'opacity 0.12s' }} />
+                    <rect x={groupX - barW / 2} y={PAD_T + chartH - barH} width={barW} height={barH} rx={3} fill={fill} opacity={isHov || isPeak ? 1 : 0.82} style={{ transition: 'opacity 0.12s' }} />
                     {showLbl && (
-                      <text x={groupX} y={H - 5} textAnchor="middle" fontSize={8}
-                        fill={isHov ? '#e8eaf0' : '#ffffff'} fontFamily="'JetBrains Mono',monospace">
+                      <text x={groupX} y={H - 5} textAnchor="middle" fontSize={8} fill={isHov ? '#fca5a5' : '#374151'} fontFamily="'JetBrains Mono',monospace">
                         {fmtHour(h)}
                       </text>
                     )}
@@ -912,12 +1035,11 @@ function ActivityChart({ activityData, devices, selectedDate, isLive, mode, onMo
                       const tipY = Math.max(PAD_T + 2, PAD_T + chartH - barH - tipH - 6);
                       return (
                         <g style={{ pointerEvents: 'none' }}>
-                          <rect x={tipX} y={tipY} width={tipW} height={tipH} rx={6}
-                            fill="rgba(7,8,10,0.97)" stroke="#2e3040" strokeWidth={1} />
+                          <rect x={tipX} y={tipY} width={tipW} height={tipH} rx={6} fill="rgba(7,8,10,0.97)" stroke="#2e3040" strokeWidth={1} />
                           <text x={tipX + tipW/2} y={tipY + 13} textAnchor="middle" fontSize={9} fill="#9ca3af" fontFamily="'JetBrains Mono',monospace">
                             {fmtHour(h)}:00 PKT
                           </text>
-                          <text x={tipX + tipW/2} y={tipY + 29} textAnchor="middle" fontSize={12} fontWeight="700" fill="#cc2222" fontFamily="'JetBrains Mono',monospace">
+                          <text x={tipX + tipW/2} y={tipY + 29} textAnchor="middle" fontSize={12} fontWeight="700" fill="#b91c1c" fontFamily="'JetBrains Mono',monospace">
                             {count.toLocaleString()} pts
                           </text>
                         </g>
@@ -933,10 +1055,7 @@ function ActivityChart({ activityData, devices, selectedDate, isLive, mode, onMo
               return (
                 <g key={h} style={{ cursor: 'pointer' }}
                   onMouseEnter={() => setHovered(h)} onMouseLeave={() => setHovered(null)}>
-                  {isHov && (
-                    <rect x={groupX - barGroupW / 2} y={PAD_T} width={barGroupW} height={chartH}
-                      fill="rgba(255,255,255,0.03)" />
-                  )}
+                  {isHov && <rect x={groupX - barGroupW / 2} y={PAD_T} width={barGroupW} height={chartH} fill="rgba(255,255,255,0.03)" />}
                   <rect x={groupX - barGroupW / 2} y={PAD_T} width={barGroupW} height={chartH + PAD_B} fill="transparent" />
                   {bin.segments.map((seg, si) => {
                     if (!seg.count) return null;
@@ -953,8 +1072,7 @@ function ActivityChart({ activityData, devices, selectedDate, isLive, mode, onMo
                     );
                   })}
                   {showLbl && (
-                    <text x={groupX} y={H - 5} textAnchor="middle" fontSize={8}
-                      fill={isHov ? '#e8eaf0' : '#ffffff'} fontFamily="'JetBrains Mono',monospace">
+                    <text x={groupX} y={H - 5} textAnchor="middle" fontSize={8} fill={isHov ? '#e8eaf0' : '#374151'} fontFamily="'JetBrains Mono',monospace">
                       {fmtHour(h)}
                     </text>
                   )}
@@ -965,8 +1083,7 @@ function ActivityChart({ activityData, devices, selectedDate, isLive, mode, onMo
                     const tipY = Math.max(PAD_T + 2, PAD_T + chartH - topH - tipH - 6);
                     return (
                       <g style={{ pointerEvents: 'none' }}>
-                        <rect x={tipX} y={tipY} width={tipW} height={tipH} rx={6}
-                          fill="rgba(7,8,10,0.97)" stroke="#2e3040" strokeWidth={1} />
+                        <rect x={tipX} y={tipY} width={tipW} height={tipH} rx={6} fill="rgba(7,8,10,0.97)" stroke="#2e3040" strokeWidth={1} />
                         <text x={tipX + tipW/2} y={tipY + 14} textAnchor="middle" fontSize={9} fill="#9ca3af" fontFamily="'JetBrains Mono',monospace">
                           {fmtHour(h)}:00 PKT — {bin.total.toLocaleString()} total
                         </text>
@@ -987,14 +1104,14 @@ function ActivityChart({ activityData, devices, selectedDate, isLive, mode, onMo
                 </g>
               );
             })}
-            <text x={PAD_L + chartW / 2} y={H} textAnchor="middle" fontSize={8} fill="#ffffff" fontFamily="'JetBrains Mono',monospace">
+            <text x={PAD_L + chartW / 2} y={H} textAnchor="middle" fontSize={8} fill="#374151" fontFamily="'JetBrains Mono',monospace">
               Hour (PKT)
             </text>
           </svg>
         )}
         {loading && hasData && (
           <div style={{ position:'absolute', inset:0, display:'flex', alignItems:'center',
-            justifyContent:'center', background:'rgba(7,8,10,0.5)', borderRadius:8, zIndex:5 }}>
+            justifyContent:'center', background:'rgba(8,8,12,0.7)', borderRadius:8, zIndex:5 }}>
             <span className="hp-spinner-inline" style={{ width:18, height:18 }} />
           </div>
         )}
@@ -1004,7 +1121,7 @@ function ActivityChart({ activityData, devices, selectedDate, isLive, mode, onMo
         <div className="hp-chart-legend">
           {deviceList.map(d => (
             <span key={d.sn} className="hp-chart-legend-item">
-              <span style={{ width: 8, height: 8, borderRadius: 2, background: d.color, display: 'inline-block', flexShrink: 0 }} />
+              <span style={{ width: 7, height: 7, borderRadius: 2, background: d.color, display: 'inline-block', flexShrink: 0 }} />
               {(d.name !== d.sn ? d.name : d.sn).replace('CARD-', '')}
             </span>
           ))}
@@ -1017,26 +1134,26 @@ function ActivityChart({ activityData, devices, selectedDate, isLive, mode, onMo
 // ══════════════════════════════════════════════════════════════════════
 // PAGE
 // ══════════════════════════════════════════════════════════════════════
-
 export default function HomePage() {
   const { getDevices, getLatestLocation, getPlayback } = useCityTag();
+  const navigate = useNavigate();
+  const { updateFromDevices, countBindsInWindow, getDevicesBoundBy } = useBindCache();
 
-  const [filters, setFilters]       = useState({ region: 'all', area: 'all', date: todayStr() });
-  const [devices, setDevices]       = useState([]);
-  const [devLoading, setDevLoading] = useState(true);
-  const [locations, setLocations]   = useState({});
-  const [locSync, setLocSync]       = useState(null);
+  const [filters, setFilters]           = useState({ region: 'all', area: 'all', areaId: null, date: todayStr() });
+  const [devices, setDevices]           = useState([]);
+  const [devLoading, setDevLoading]     = useState(true);
+  const [locations, setLocations]       = useState({});
+  const [locSync, setLocSync]           = useState(null);
   const [activityData, setActivityData] = useState({});
   const [chartLoading, setChartLoading] = useState(false);
   const [chartMode, setChartMode]       = useState('general');
   const [kmlAreas, setKmlAreas]         = useState([]);
 
-  const isLive       = filters.date === todayStr();
-  const locAbortRef      = useRef(null);
-  const trajAbortRef     = useRef(null);
-  const activitySyncRef  = useRef(null); // ISO string of last activity fetch — enables incremental mode
+  const isLive          = filters.date === todayStr();
+  const locAbortRef     = useRef(null);
+  const trajAbortRef    = useRef(null);
+  const activitySyncRef = useRef(null);
 
-  // Load KML areas once for region breach detection
   useEffect(() => {
     fetch('/areas.kml')
       .then(r => r.text())
@@ -1044,7 +1161,6 @@ export default function HomePage() {
       .catch(() => {});
   }, []);
 
-  // Compute which devices are outside their assigned region (uses already-polling locations)
   const regionBreaches = useMemo(() => {
     if (!kmlAreas.length) return [];
     return devices
@@ -1058,12 +1174,7 @@ export default function HomePage() {
         const lng = Number(loc.lng ?? loc.lon ?? loc.longitude ?? loc.gpsLng ?? loc.wgLng);
         if (isNaN(lat) || isNaN(lng)) return null;
         if (pointInArea([lat, lng], area.coords)) return null;
-        return {
-          sn:     d.sn,
-          name:   d.name ?? d.assignedUser ?? d.sn,
-          region: d.region,
-          ts:     loc.timestamp ?? loc.time ?? loc.locTime ?? null,
-        };
+        return { sn: d.sn, name: d.name ?? d.assignedUser ?? d.sn, region: d.region, ts: loc.timestamp ?? loc.time ?? loc.locTime ?? null };
       })
       .filter(Boolean);
   }, [devices, locations, kmlAreas]);
@@ -1072,7 +1183,12 @@ export default function HomePage() {
     let cancelled = false;
     setDevLoading(true);
     getDevices()
-      .then(res => { if (cancelled) return; setDevices(Array.isArray(res) ? res : (res?.devices ?? [])); })
+      .then(res => {
+        if (cancelled) return;
+        const list = Array.isArray(res) ? res : (res?.devices ?? []);
+        setDevices(list);
+        updateFromDevices(list); // persist bindTimes to cache context + localStorage
+      })
       .catch(() => {})
       .finally(() => { if (!cancelled) setDevLoading(false); });
     return () => { cancelled = true; };
@@ -1114,35 +1230,24 @@ export default function HomePage() {
     trajAbortRef.current?.abort();
     const ctrl = new AbortController();
     trajAbortRef.current = ctrl;
-
-    // Incremental: only fetch delta since last sync — live only, and only if we already have data
     const useIncremental = incremental && live && !!activitySyncRef.current;
-    const start = useIncremental ? new Date(activitySyncRef.current) : dayRange(dateStr, live).start;
-    const end   = live ? new Date() : dayRange(dateStr, live).end;
-    const snapNow = new Date().toISOString(); // capture before any await
-
-    if (!useIncremental) {
-      if (!live) setChartLoading(true); // only show loader for historical, not live
-      setActivityData({});
-    }
-
+    const { start: dayStart, end: dayEnd } = dayRange(dateStr, live);
+    const start   = useIncremental ? new Date(activitySyncRef.current) : dayStart;
+    const end     = live ? new Date(Date.now() + 2 * 3600 * 1000) : dayEnd;
+    const snapNow = new Date().toISOString();
+    if (!useIncremental) { setChartLoading(true); setActivityData({}); }
     const fetch1 = (sn) => getPlayback(sn, start, end)
       .then(res => ({ sn, pts: Array.isArray(res?.points) ? res.points : Array.isArray(res) ? res : [] }))
       .catch(() => null);
-
     let results;
     if (useIncremental) {
-      // Tiny delta payloads — fire all in parallel
       const settled = await Promise.allSettled(devices.map(d => fetch1(d.sn ?? '')));
       results = settled.map(r => r.status === 'fulfilled' ? r.value : null);
     } else {
-      // Full day — respect concurrency to avoid hammering the backend
       results = await pLimit(devices.map(d => () => fetch1(d.sn ?? '')), FETCH_CONCURRENCY);
     }
-
     if (ctrl.signal.aborted) return;
     activitySyncRef.current = snapNow;
-
     if (useIncremental) {
       setActivityData(prev => {
         const next = { ...prev };
@@ -1159,19 +1264,17 @@ export default function HomePage() {
 
   useEffect(() => {
     if (!devices.length) return;
-    activitySyncRef.current = null; // force full fetch on any filter or device change
+    activitySyncRef.current = null;
     fetchActivity(filters.date, isLive, false);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [filters.date, filters.region, filters.area, devices.length]);
 
   useEffect(() => {
     if (!isLive || !devices.length) return;
-    // Subsequent live polls use incremental mode — only fetch new points since last sync
     const id = setInterval(() => fetchActivity(filters.date, true, true), TRAJECTORY_POLL_MS);
     return () => clearInterval(id);
   }, [isLive, filters.date, devices.length, fetchActivity]);
 
-  // Derive filtered device list from region selector
   const filteredDevices = useMemo(() => {
     if (filters.region === 'all') return devices;
     const entry = KML_REGIONS.find(r => r.value === filters.region);
@@ -1180,47 +1283,68 @@ export default function HomePage() {
     return devices.filter(d => areaSet.has((d.region ?? '').toLowerCase()));
   }, [devices, filters.region]);
 
-  // Slice activity data to only the filtered devices
-  const filteredActivityData = useMemo(() => {
-    if (filters.region === 'all') return activityData;
-    const snSet = new Set(filteredDevices.map(d => d.sn ?? ''));
-    return Object.fromEntries(Object.entries(activityData).filter(([sn]) => snSet.has(sn)));
-  }, [activityData, filteredDevices, filters.region]);
+  // ── selectedDateTime — end of the selected date (used for all date math) ──
+  const selectedDateTime = useMemo(
+    () => new Date(filters.date + 'T23:59:59'),
+    [filters.date]
+  );
 
-  const totalDevices = filteredDevices.length;
-  const activeNow = filteredDevices.filter(d => {
-    if (d.status === 'online') return true;
-    const sn = d.sn ?? '';
-    const ts = locations[sn]?.timestamp ?? locations[sn]?.time;
-    return ts && (Date.now() - new Date(ts).getTime()) < 30 * 60 * 1000;
-  }).length;
+  // ── dateFilteredDevices ────────────────────────────────────────────────────
+  // Historical: only devices that were bound on or before the selected date.
+  // Live: all region-filtered devices (no date restriction).
+  const dateFilteredDevices = useMemo(() => {
+    if (isLive) return filteredDevices;
+    return getDevicesBoundBy(filteredDevices, selectedDateTime);
+  }, [isLive, filteredDevices, selectedDateTime, getDevicesBoundBy]);
+
+  // ── Activity filtered to dateFilteredDevices ───────────────────────────────
+  const filteredActivityData = useMemo(() => {
+    const snSet = new Set(dateFilteredDevices.map(d => d.sn ?? ''));
+    return Object.fromEntries(
+      Object.entries(activityData).filter(([sn]) => snSet.has(sn))
+    );
+  }, [activityData, dateFilteredDevices]);
+
+  // ── Stat card values — all scoped to selectedDate ─────────────────────────
+  const totalDevices = dateFilteredDevices.length;
+
+  const activeNow = useMemo(() => {
+    if (isLive) {
+      return dateFilteredDevices.filter(d => {
+        if (d.status === 'online') return true;
+        const ts = locations[d.sn ?? '']?.timestamp ?? locations[d.sn ?? '']?.time;
+        return ts && (Date.now() - new Date(ts).getTime()) < 30 * 60_000;
+      }).length;
+    }
+    // Historical: a device is "active" if it sent any data on the selected date
+    return dateFilteredDevices.filter(
+      d => (filteredActivityData[d.sn ?? '']?.length ?? 0) > 0
+    ).length;
+  }, [isLive, dateFilteredDevices, locations, filteredActivityData]);
+
   const offlineCount = totalDevices - activeNow;
 
-  // Weekly bind rate — devices bound during the ISO week containing the selected/today date
+  // ── Weekly binds — 7-day window ending on selectedDate ────────────────────
   const weeklyBinds = useMemo(() => {
-    const ref = filters.date ? new Date(filters.date + 'T23:59:59') : new Date();
-    // Monday of that week (ISO)
-    const day = ref.getDay(); // 0=Sun … 6=Sat
-    const diffToMon = (day + 6) % 7;
-    const weekStart = new Date(ref);
-    weekStart.setDate(ref.getDate() - diffToMon);
-    weekStart.setHours(0, 0, 0, 0);
-    return filteredDevices.filter(d => {
-      const raw = d.bindTime ?? d.bound_at ?? d.createdAt ?? null;
-      if (!raw) return false;
-      const dt = new Date(raw);
-      return !isNaN(dt) && dt >= weekStart && dt <= ref;
-    }).length;
-  }, [filteredDevices, filters.date]);
+    const to   = selectedDateTime;
+    const from = new Date(to.getTime() - 7 * 24 * 3600_000);
+    return countBindsInWindow(filteredDevices, from, to);
+  }, [filteredDevices, selectedDateTime, countBindsInWindow]);
 
   return (
     <div className="hp-page">
 
-      {/* ── Row 1: Header ───────────────────────────────────────── */}
+      {/* Header */}
       <div className="hp-top-row">
-        <LiveClock isHistorical={!isLive} selectedDate={filters.date} />
+        <div className="hp-header-left">
+          <h1 className="hp-heading-title">TPL TRAKKER — Locator Dashboard</h1>
+        </div>
         <div className="hp-top-right">
-          <FilterBar filters={filters} onChange={setFilters} />
+          <LiveClock
+            isHistorical={!isLive}
+            selectedDate={filters.date}
+            onDateChange={date => setFilters(f => ({ ...f, date }))}
+          />
           {isLive && (
             <>
               <button className="hp-refresh-btn" onClick={fetchLocations}>
@@ -1237,55 +1361,54 @@ export default function HomePage() {
               </button>
             </>
           )}
+          <button className="btn-fieldstaff" onClick={() => navigate('/field-staff-dashboard')}>
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+              <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/>
+              <circle cx="9" cy="7" r="4"/>
+              <path d="M23 21v-2a4 4 0 0 0-3-3.87"/>
+              <path d="M16 3.13a4 4 0 0 1 0 7.75"/>
+            </svg>
+            Field Staff
+          </button>
         </div>
       </div>
 
-      {/*
-        ── Row 2: Top band ─────────────────────────────────────────
-        [Stats col] [Top5 Packets] [Top Users] [Packet Gap Detector]
-      */}
-      <div className="hp-top-band">
-        {/* 3 compact stat cards stacked in a narrow column */}
-        <div className="hp-stats-col">
-          <StatCard
-            title="Total Devices" value={totalDevices} loading={devLoading}
-            accentColor="#60a5fa"
-            icon={<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="5" y="2" width="14" height="20" rx="2"/><line x1="12" y1="18" x2="12.01" y2="18"/></svg>}
-            iconBg="rgba(59,130,246,0.12)" iconColor="#60a5fa"
-            rate={weeklyBinds}
-          />
-          <StatCard
-            title="Active in Zone" value={activeNow} loading={devLoading}
-            accentColor="#4ade80"
-            icon={<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>}
-            iconBg="rgba(22,163,74,0.12)" iconColor="#4ade80"
-          />
-          <StatCard
-            title="Offline / Absent" value={offlineCount} loading={devLoading}
-            accentColor="#fca5a5"
-            icon={<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10"/><line x1="4.93" y1="4.93" x2="19.07" y2="19.07"/></svg>}
-            iconBg="rgba(239,68,68,0.12)" iconColor="#fca5a5"
-          />
-        </div>
-
-        {/* Top Devices, Top Users, Registrations, ZoneStats, DevicesPerUser — all in top band */}
-        <TopDevices devices={filteredDevices} activityData={filteredActivityData} />
-        <RegistrationsDonut devices={filteredDevices} selectedDate={filters.date} />
-        <UserDevicePanel devices={filteredDevices} />
+      {/* Section 1: 4 stat cards */}
+      <div className="hp-stats-row">
+        <StatCard
+          title="Total Devices" value={totalDevices} loading={devLoading}
+          accentColor="#3b82f6"
+          icon={<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="5" y="2" width="14" height="20" rx="2"/><line x1="12" y1="18" x2="12.01" y2="18"/></svg>}
+          iconBg="rgba(59,130,246,0.12)" iconColor="#3b82f6"
+          rate={weeklyBinds}
+          progress={null}
+        />
+        <StatCard
+          title="Active Locators" value={activeNow} loading={devLoading}
+          accentColor="#16a34a"
+          icon={<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>}
+          iconBg="rgba(22,163,74,0.12)" iconColor="#16a34a"
+          progress={totalDevices > 0 ? (activeNow / totalDevices) * 100 : 0}
+          subtitle={!isLive ? `on ${filters.date}` : null}
+        />
+        <StatCard
+          title="Offline / Absent" value={offlineCount} loading={devLoading}
+          accentColor="#dc2626"
+          icon={<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10"/><line x1="4.93" y1="4.93" x2="19.07" y2="19.07"/></svg>}
+          iconBg="rgba(220,38,38,0.12)" iconColor="#dc2626"
+          progress={totalDevices > 0 ? (offlineCount / totalDevices) * 100 : 0}
+          subtitle={!isLive ? `on ${filters.date}` : null}
+        />
+        <BatteryStatusCard />
       </div>
 
-      {/*
-        ── Row 3: Main ─────────────────────────────────────────────
-        [Sidebar: RegionBreachPanel] | [Chart fills rest]
-      */}
-      <div className="hp-main-row">
-        <div className="hp-sidebar">
-          <RegionBreachPanel breaches={regionBreaches} totalWithRegion={devices.filter(d => d.region).length} />
-        </div>
-        <div className="hp-chart-area">
+      {/* Section 2: Users panel + Activity chart */}
+      <div className="hp-charts-row">
+        <UserDevicePanel devices={dateFilteredDevices} />
+        <div className="hp-chart-wide">
           <ActivityChart
             activityData={filteredActivityData}
-            devices={filteredDevices}
+            devices={dateFilteredDevices}
             selectedDate={filters.date}
             isLive={isLive}
             mode={chartMode}
@@ -1294,6 +1417,24 @@ export default function HomePage() {
             lastSync={locSync}
           />
         </div>
+      </div>
+
+      {/* Section 3: Recent Activity — date-scoped */}
+      <RecentActivityCard
+        devices={dateFilteredDevices}
+        locations={locations}
+        activityData={filteredActivityData}
+        isLive={isLive}
+      />
+
+      {/* Section 4: Top Users | Bound Devices */}
+      <div className="hp-charts-row hp-charts-row--bottom hp-section4">
+        <TopUsersPanel
+          devices={dateFilteredDevices}
+          activityData={filteredActivityData}
+          isLive={isLive}
+        />
+        <BoundDevicesChart devices={filteredDevices} selectedDate={filters.date} />
       </div>
 
     </div>

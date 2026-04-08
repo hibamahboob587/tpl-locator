@@ -26,6 +26,7 @@ class LoginRequest(BaseModel):
     email: EmailStr
     password: str
     uid: Optional[str] = None  # only needed for admin login
+    role: str  # "admin" or "user"
 
 
 class LoginResponse(BaseModel):
@@ -48,38 +49,42 @@ async def login(
     mongo: Annotated[MongoService, Depends(get_mongo_service)],
 ):
     """
-    Unified login endpoint for both admins and users.
+    Login endpoint for admins and users.
 
     Admin authentication is purely local (Mongo) to keep login stable.
     CityTag interactions (token refresh + device/location sync) are handled by /sync endpoints.
     """
-    logger.info("login started email=%s uid=%s", payload.email, payload.uid)
+    email = payload.email.strip().lower()
+    logger.info("login started email=%s role=%s", email, payload.role)
 
-    # check admin first
-    admin = await mongo.get_admin_by_email(payload.email)
-    if admin:
-        if not payload.uid:
-            raise HTTPException(status_code=400, detail="UID required for admin login")
-
-        # Local authentication only
-        if not verify_password(payload.password, admin.password):
-            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")
+    if payload.role == "admin":
+        # Admin login - only check admin table
+        admin = await mongo.get_admin_by_email(email)
+        if not admin or not verify_password(payload.password, admin.password):
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid admin credentials")
 
         # Upsert admin doc (without forcing CityTag token/device refresh)
-        admin_data = AdminCreate(email=payload.email, password=payload.password, uid=payload.uid)
-        admin = await mongo.create_or_update_admin(admin_data)
-        logger.info("admin upserted email=%s admin_id=%s", payload.email, admin.id)
+        admin_data = AdminCreate(email=email, password=payload.password, uid=payload.uid or admin.uid or "")
+        try:
+            admin = await mongo.create_or_update_admin(admin_data)
+        except ValueError as e:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+        logger.info("admin login completed email=%s admin_id=%s", email, admin.id)
 
         access_token = create_access_token(str(admin.id), "admin")
         return LoginResponse(admin=admin_to_public(admin), role="admin", access_token=access_token)
 
-    # user login
-    user = await mongo.get_user_by_email(payload.email)
-    if not user or not verify_password(payload.password, user.password):
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")
-    access_token = create_access_token(str(user.id), "user")
-    logger.info("user login completed email=%s user_id=%s", payload.email, user.id)
-    return LoginResponse(user=user_to_public(user), role="user", access_token=access_token)
+    elif payload.role == "user":
+        # User login - only check user table
+        user = await mongo.get_user_by_email(email)
+        if not user or not verify_password(payload.password, user.password):
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid user credentials")
+        access_token = create_access_token(str(user.id), "user")
+        logger.info("user login completed email=%s user_id=%s", email, user.id)
+        return LoginResponse(user=user_to_public(user), role="user", access_token=access_token)
+
+    else:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid role")
 
 
 # FIX 1: removed `response_model=UserPublic` — we now return a custom dict
@@ -91,13 +96,23 @@ async def register(
     mongo: Annotated[MongoService, Depends(get_mongo_service)],
 ):
     """Create a new user account (role=user), auto-login on success."""
-    logger.info("register started email=%s", payload.email)
-    existing = await mongo.get_user_by_email(payload.email)
-    if existing:
+    email = payload.email.strip().lower()
+    logger.info("register started email=%s", email)
+    
+    # Check if email already exists in admin table
+    existing_admin = await mongo.get_admin_by_email(email)
+    logger.info("register check admin email=%s found=%s", email, existing_admin is not None)
+    if existing_admin:
+        logger.warning("register blocked: email already registered as admin: %s", email)
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Email already registered as admin")
+    
+    # Check if email already exists in user table
+    existing_user = await mongo.get_user_by_email(email)
+    if existing_user:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Email already registered")
 
     name = (payload.name or "").strip()
-    user = await mongo.create_user(payload.email, payload.password, name)
+    user = await mongo.create_user(email, payload.password, name)
 
     # FIX 2: explicitly stamp name + created_at on the doc.
     # create_user() may not write these fields depending on its implementation.
