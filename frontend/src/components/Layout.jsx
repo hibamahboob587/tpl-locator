@@ -260,6 +260,10 @@ const Layout = ({ children }) => {
   const [showProfileSettings, setShowProfileSettings] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
+  // Pages where map theme toggle should be hidden
+  const hideMapThemePaths = ['/', '/Homepage', '/devices', '/report', '/field-staff-dashboard'];
+  const shouldHideMapTheme = hideMapThemePaths.includes(location.pathname);
+
   const handleLogout = () => {
     logout();
     navigate('/login');
@@ -267,7 +271,7 @@ const Layout = ({ children }) => {
 
   const navItems = [
     { path: '/Homepage',   label: 'Home'       },
-    { path: '/devices',    label: 'Devices'    },
+    { path: '/devices',    label: 'Locators'   },
     { path: '/trajectory', label: 'Trajectory' },
     { path: '/mapview',    label: 'Map View'   },
     { path: '/playback',   label: 'Playback'   },
@@ -319,7 +323,7 @@ const Layout = ({ children }) => {
             </div>
 
             <div className="header-right">
-              <MapThemeToggle />
+              {!shouldHideMapTheme && <MapThemeToggle />}
 
               <span style={{
                 fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.12em',

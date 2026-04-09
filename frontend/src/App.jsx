@@ -5,6 +5,7 @@ import { Navigate, Route, Routes } from "react-router-dom";
 import Login from "./pages/Login.jsx";
 import { useAuth } from "./context/AuthContext.jsx";
 import { MapThemeProvider } from "./context/MapThemeContext.jsx";
+import { BindCacheProvider } from "./context/BindCacheContext.jsx";
 
 import Layout from "./components/Layout.jsx";
 import HomePage from "./pages/HomePage.jsx";
@@ -14,7 +15,7 @@ import MapViewPage from "./pages/MapViewPage.jsx";
 import PlaybackPage from "./pages/PlaybackPage.jsx";
 import ReportPage from "./pages/ReportPage.jsx";
 import FencePage from "./pages/Fencepage.jsx";
-
+import FieldStaffDashboard from "./pages/FieldStaffDashboard.jsx";
 
 function ProtectedRoute({ children }) {
   const { accessToken } = useAuth();
@@ -32,6 +33,7 @@ export default function App() {
         path="/*"
         element={
           <ProtectedRoute>
+            <BindCacheProvider>
             <MapThemeProvider>
               <Layout>
                 <Routes>
@@ -43,10 +45,12 @@ export default function App() {
                   <Route path="/playback" element={<PlaybackPage />} />
                   <Route path="/fence" element={<FencePage />} />
                   <Route path="/report" element={<ReportPage />} />
+                  <Route path="/field-staff-dashboard" element={<FieldStaffDashboard />} />
                   <Route path="*" element={<Navigate to="/Homepage" replace />} />
                 </Routes>
               </Layout>
             </MapThemeProvider>
+            </BindCacheProvider>
           </ProtectedRoute>
         }
       />

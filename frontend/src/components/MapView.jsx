@@ -46,21 +46,23 @@ async function geocodeCached(lat, lng) {
   return result;
 }
 
-function createCarMarkerEl() {
+function createLocationMarkerEl() {
   const el = document.createElement("div");
   el.style.cssText = "width:40px;height:40px;cursor:pointer;";
   el.innerHTML = `
-    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="40" height="40">
-      <circle cx="32" cy="32" r="30" fill="#7f1d1d" stroke="#ffffff" stroke-width="3"/>
-      <g transform="translate(12,14) scale(1.25)">
-        <path d="M29.5 10.5l-3-7.5H9.5l-3 7.5H2v3h2l1 14h26l1-14h2v-3h-4.5z" fill="none"/>
-        <path d="M28 10H8l2.5-6h15L28 10z" fill="#fff" opacity="0.9"/>
-        <rect x="3" y="10" width="30" height="13" rx="2" fill="#fff" opacity="0.9"/>
-        <circle cx="9" cy="25" r="3.5" fill="#333" stroke="#fff" stroke-width="1.5"/>
-        <circle cx="27" cy="25" r="3.5" fill="#333" stroke="#fff" stroke-width="1.5"/>
-        <rect x="8" y="12" width="8" height="5" rx="1" fill="#7f1d1d" opacity="0.7"/>
-        <rect x="20" y="12" width="8" height="5" rx="1" fill="#7f1d1d" opacity="0.7"/>
-      </g>
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 40 40" width="40" height="40">
+      <defs>
+        <filter id="glow">
+          <feGaussianBlur stdDeviation="3" result="coloredBlur"/>
+          <feMerge>
+            <feMergeNode in="coloredBlur"/>
+            <feMergeNode in="SourceGraphic"/>
+          </feMerge>
+        </filter>
+      </defs>
+      <circle cx="20" cy="20" r="8" fill="#800000" stroke="#ffffff" stroke-width="2" filter="url(#glow)"/>
+      <circle cx="20" cy="20" r="3" fill="#ffffff" opacity="0.8"/>
+      <circle cx="20" cy="20" r="2" fill="#800000"/>
     </svg>`;
   return el;
 }
@@ -253,7 +255,27 @@ export default function MapView({ sn, label, latest, trajectory = [], playbackPo
   useEffect(() => {
     const map = mapRef.current;
     if (!map) return;
+
+    // Store current map state before style change
+    const currentCenter = map.getCenter();
+    const currentZoom = map.getZoom();
+    
+    // Change style and set up restoration
     map.setStyle(`mapbox://styles/mapbox/${mapTheme === "dark" ? "dark-v11" : "light-v11"}`);
+    
+    // When style loads, restore map view and trigger data restoration
+    const onStyleLoad = () => {
+      setMapLoaded(false); // Reset to force re-add all layers
+      setTimeout(() => setMapLoaded(true), 50); // Small delay to ensure style is fully loaded
+      // Restore map view
+      map.jumpTo({ center: currentCenter, zoom: currentZoom });
+    };
+    
+    map.on('style.load', onStyleLoad);
+    
+    return () => {
+      map.off('style.load', onStyleLoad);
+    };
   }, [mapTheme]);
 
   /* ── CUSTOM LOCATION LABELS ───────────────────── */
@@ -304,7 +326,7 @@ export default function MapView({ sn, label, latest, trajectory = [], playbackPo
         },
       });
     }).catch(() => {});
-  }, [mapLoaded]);
+  }, [mapLoaded, mapTheme]); // Add mapTheme dependency
 
   /* ── MARKER ───────────────────────────────────── */
   useEffect(() => {
@@ -334,13 +356,9 @@ export default function MapView({ sn, label, latest, trajectory = [], playbackPo
     prevIsPlayback.current = isPlayback;
 
     if (!markerRef.current) {
-      markerRef.current = isPlayback
-        ? new mapboxgl.Marker({ element: createCarMarkerEl() })
-            .setLngLat([coords.lng, coords.lat])
-            .addTo(map)
-        : new mapboxgl.Marker({ color: "#800000", scale: 1.3 })
-            .setLngLat([coords.lng, coords.lat])
-            .addTo(map);
+      markerRef.current = new mapboxgl.Marker({ color: "#800000", scale: 1.3 })
+        .setLngLat([coords.lng, coords.lat])
+        .addTo(map);
 
       const markerEl = markerRef.current.getElement();
       markerEl.style.cursor = "pointer";
@@ -360,7 +378,7 @@ export default function MapView({ sn, label, latest, trajectory = [], playbackPo
     }
 
     map.flyTo({ center: [coords.lng, coords.lat], zoom: 15, essential: true, duration: 1000 });
-  }, [coords, currentPoint, sn, displayName, label, isPlayback, geocode]);
+  }, [coords, currentPoint, sn, displayName, label, isPlayback, geocode, mapTheme]); // Add mapTheme dependency
 
   /* ── TRAJECTORY LINE + POINTS ─────────────────── */
   // The mousemove handler is attached ONCE on map load and reads trajectory
@@ -528,7 +546,7 @@ export default function MapView({ sn, label, latest, trajectory = [], playbackPo
       map.getSource("route")?.setData(lineGeojson);
       map.getSource("route-points")?.setData(pointsGeojson);
     }
-  }, [trajectory, mapLoaded, showLine]);
+  }, [trajectory, mapLoaded, showLine, mapTheme]); // Add mapTheme dependency
 
   /* ── UI ───────────────────────────────────────── */
   return (

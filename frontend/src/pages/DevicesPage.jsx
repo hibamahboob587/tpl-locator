@@ -99,18 +99,18 @@ const HomePage = () => {
         await adminAssignDeviceToUser(bindUserId, bindSn, { name: bindName.trim(), client: bindClient.trim() });
         refreshDevices(); refreshUsers(); closeBindModal();
       } catch (err) {
-        setBindError(err.message || 'Failed to bind device');
+        setBindError(err.message || 'Failed to bind locator');
       } finally {
         setBindLoading(false);
       }
     } else {
-      if (!bindSn.trim()) { setBindError('Please enter a device serial number'); return; }
+      if (!bindSn.trim()) { setBindError('Please enter a locator serial number'); return; }
       setBindError(''); setBindLoading(true);
       try {
         await bindDevice({ sn: bindSn.trim(), label: bindName.trim() || undefined });
         refreshDevices(); closeBindModal();
       } catch (err) {
-        setBindError(err.message || 'Failed to bind device');
+        setBindError(err.message || 'Failed to bind locator');
       } finally {
         setBindLoading(false);
       }
@@ -202,7 +202,7 @@ const HomePage = () => {
             <div className="section-header-left">
               {isAdmin && (
                 <div className="view-toggle">
-                  <button className={`toggle-btn ${viewMode === 'devices' ? 'active' : ''}`} onClick={() => setViewMode('devices')}>Devices</button>
+                  <button className={`toggle-btn ${viewMode === 'devices' ? 'active' : ''}`} onClick={() => setViewMode('devices')}>Locators</button>
                   <button className={`toggle-btn ${viewMode === 'users' ? 'active' : ''}`} onClick={() => setViewMode('users')}>Users</button>
                 </div>
               )}
@@ -236,7 +236,7 @@ const HomePage = () => {
                     <path d="M11 3a1 1 0 10-2 0v1H4a2 2 0 00-2 2v10a2 2 0 002 2h12a2 2 0 002-2V6a2 2 0 00-2-2h-5V3z"/>
                     <path fillRule="evenodd" d="M10 8a1 1 0 011 1v1h1a1 1 0 110 2h-1v1a1 1 0 11-2 0v-1H8a1 1 0 110-2h1V9a1 1 0 011-1z" clipRule="evenodd"/>
                   </svg>
-                  Bind Device
+                  Bind Locator
                 </button>
               ) : (
                 <button className="btn-bind" onClick={openCreateUserModal}>
@@ -296,7 +296,7 @@ const HomePage = () => {
                     <path fillRule="evenodd" d="M10 8a1 1 0 011 1v1h1a1 1 0 110 2h-1v1a1 1 0 11-2 0v-1H8a1 1 0 110-2h1V9a1 1 0 011-1z" clipRule="evenodd"/>
                   </svg>
                 </div>
-                <h3>Bind Device</h3>
+                <h3>Bind Locator</h3>
               </div>
               <button className="hp-modal-close" onClick={closeBindModal}>✕</button>
             </div>
@@ -313,7 +313,7 @@ const HomePage = () => {
                   <div className="hp-modal-field">
                     <label>Serial Number <span className="required">*</span></label>
                     {unboundDevices.length === 0 ? (
-                      <p style={{ color:'#71717a', fontSize:12, margin:'4px 0 0' }}>No unbound devices available</p>
+                      <p style={{ color:'#71717a', fontSize:12, margin:'4px 0 0' }}>No unbound locators available</p>
                     ) : (
                       <select value={bindSn} onChange={(e) => setBindSn(e.target.value)} style={SELECT_STYLE}>
                         {unboundDevices.map((d) => (
@@ -339,7 +339,7 @@ const HomePage = () => {
                     )}
                   </div>
                   <div className="hp-modal-field">
-                    <label>Device Name <span style={{ fontWeight:400, color:'#71717a' }}>(optional)</span></label>
+                    <label>Locator Name <span style={{ fontWeight:400, color:'#71717a' }}>(optional)</span></label>
                     <input type="text" placeholder="e.g. My Car, Office Van…" value={bindName} onChange={(e) => setBindName(e.target.value)} />
                   </div>
                   <div className="hp-modal-field">
@@ -350,7 +350,7 @@ const HomePage = () => {
               ) : (
                 <>
                   <div className="hp-modal-field">
-                    <label>Device Serial Number <span className="required">*</span></label>
+                    <label>Locator Serial Number <span className="required">*</span></label>
                     <input
                       type="text"
                       placeholder="e.g. 201404628953"
@@ -367,12 +367,12 @@ const HomePage = () => {
                     />
                     {devices.length > 0 && (
                       <p style={{ margin: '6px 0 0', fontSize: 11, color: '#52525b' }}>
-                        You have {devices.length} device{devices.length !== 1 ? 's' : ''} already bound. Enter a serial number to add another.
+                        You have {devices.length} locator{devices.length !== 1 ? 's' : ''} already bound. Enter a serial number to add another.
                       </p>
                     )}
                   </div>
                   <div className="hp-modal-field">
-                    <label>Device Name <span style={{ fontWeight:400, color:'#71717a' }}>(optional)</span></label>
+                    <label>Locator Name <span style={{ fontWeight:400, color:'#71717a' }}>(optional)</span></label>
                     <input
                       type="text"
                       placeholder="e.g. My Car, Office Van…"
@@ -398,7 +398,7 @@ const HomePage = () => {
                 onClick={handleBind}
                 disabled={bindLoading || (isAdmin ? (!bindSn || !bindUserId) : !bindSn.trim())}
               >
-                {bindLoading ? "Saving…" : "Bind Device"}
+                {bindLoading ? "Saving…" : "Bind Locator"}
               </button>
             </div>
           </div>
@@ -416,7 +416,7 @@ const HomePage = () => {
                     <path d="M13.586 3.586a2 2 0 112.828 2.828l-8.5 8.5a1 1 0 01-.39.243l-3 1a1 1 0 01-1.266-1.266l1-3a1 1 0 01.243-.39l8.5-8.5z"/>
                   </svg>
                 </div>
-                <h3>Edit Device</h3>
+                <h3>Edit Locator</h3>
               </div>
               <button className="hp-modal-close" onClick={closeEditDevice}>✕</button>
             </div>
@@ -431,7 +431,7 @@ const HomePage = () => {
                 <input type="text" value={editDevice.sn} readOnly style={{ opacity: 0.5, cursor: 'not-allowed' }} />
               </div>
               <div className="hp-modal-field">
-                <label>Device Name</label>
+                <label>Locator Name</label>
                 <input
                   type="text"
                   placeholder="e.g. Office Van"

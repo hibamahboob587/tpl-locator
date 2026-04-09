@@ -38,12 +38,12 @@ export function useCityTag() {
 
   const login = useCallback(
     async ({ email, password }) =>
-      apiFetch("/api/login", { method: "POST", body: { email, password, uid: "" } }, null), []
+      apiFetch("/api/login", { method: "POST", body: { email, password, uid: "", role: "user" } }, null), []
   );
 
   const adminLogin = useCallback(
-    async ({ email, password, uid }) =>
-      apiFetch("/api/login", { method: "POST", body: { email, password, uid: (uid || "").trim() } }, null), []
+    async ({ email, password }) =>
+      apiFetch("/api/login", { method: "POST", body: { email, password, uid: "", role: "admin" } }, null), []
   );
 
   const signup = useCallback(
@@ -172,6 +172,11 @@ export function useCityTag() {
     }, [accessToken]
   );
 
+  const getFieldStaffLiveDevices = useCallback(
+    async () => apiFetch("/api/field-staff/live-devices", {}, accessToken),
+    [accessToken]
+  );
+
   return {
     login, adminLogin, signup,
     getDevices, getUsers, adminGetUsers, adminCreateUser,
@@ -179,5 +184,6 @@ export function useCityTag() {
     adminUpdateDevice,
     bindDevice, bindDeviceByEmail, unbindDevice, adminUnbindDevice,
     searchDevice, getLatestLocation, getTrajectory, getPlayback,
+    getFieldStaffLiveDevices,
   };
 }

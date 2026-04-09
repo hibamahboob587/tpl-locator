@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(find /c/Users/Test-August2023/Downloads/TPL-Locator/backend -type f \\\\\\(-name *.js -o -name *.json -o -name *.py \\\\\\))",
+      "mcp__Claude_Preview__preview_start",
+      "Bash(npx vite:*)",
+      "Bash(node -e \":*)"
+    ]
+  }
+}
