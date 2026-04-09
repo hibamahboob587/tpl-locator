@@ -217,9 +217,8 @@
 /* ─── Main Content ────────────────────────────── */
 .main-content {
   flex: 1;
-  min-height: 0;
-  overflow-y: auto;
-  overflow-x: hidden;
+  min-height: 0;          
+  overflow: hidden;       
   background: var(--bg-primary);
 }
 

@@ -52,14 +52,14 @@ class MongoService:
         return self.db["locations"]
 
     async def get_admin_by_email(self, email: str) -> Optional[AdminInDB]:
-        doc = await self.admins.find_one({"email": email.strip().lower()})
+        doc = await self.admins.find_one({"email": email})
         if not doc:
             return None
         return AdminInDB(**doc)
 
     # ---------- user methods ----------
     async def get_user_by_email(self, email: str):
-        doc = await self.users.find_one({"email": email.strip().lower()})
+        doc = await self.users.find_one({"email": email})
         if not doc:
             return None
         from app.models.user import UserInDB
@@ -79,7 +79,7 @@ class MongoService:
     async def create_user(self, email: str, password: str, name: Optional[str] = None) -> 'UserInDB':
         from app.models.user import UserInDB
         payload = {
-            "email": email.strip().lower(),
+            "email": email,
             "password": hash_password(password),
             "name": name or "",
             "role": "user",
@@ -148,19 +148,6 @@ class MongoService:
         await self.users.update_one({"_id": user_id}, {"$pull": {"devices": device_doc["_id"]}})
         return True
 
-    async def update_device(self, sn: str, name: Optional[str] = None, client: Optional[str] = None, region: Optional[str] = None):
-        update_fields = {}
-        if name is not None:
-            update_fields["name"] = name.strip() if name else ""
-        if client is not None:
-            update_fields["client"] = client.strip() if client else None
-        if region is not None:
-            update_fields["region"] = region.strip() if region else None
-        if update_fields:
-            await self.devices.update_one({"sn": sn}, {"$set": update_fields})
-        updated = await self.devices.find_one({"sn": sn})
-        return DeviceInDB(**updated) if updated else None
-
     async def get_admin_by_id(self, admin_id: str) -> Optional[AdminInDB]:
         try:
             oid = ObjectId(admin_id)
@@ -177,14 +164,9 @@ class MongoService:
         citytag_token: Optional[str] = None,
         reg_devices: Optional[List[str]] = None,
     ) -> AdminInDB:
-        # Check if email already exists in user table
-        existing_user = await self.get_user_by_email(data.email)
-        if existing_user:
-            raise ValueError("Email already registered as user")
-            
         existing = await self.get_admin_by_email(data.email)
         payload = {
-            "email": data.email.strip().lower(),
+            "email": data.email,
             "password": hash_password(data.password),
             "uid": data.uid,
         }

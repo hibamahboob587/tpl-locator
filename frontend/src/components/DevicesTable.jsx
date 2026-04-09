@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import TPLLoader from './TPLLoader.jsx';
+import tplLogo from '../assets/tpl.png';
 import './DevicesTable.css';
 
 function formatDateTime(value) {
@@ -34,6 +34,23 @@ function formatDateTimeWithOffset(value, offsetHours = 0) {
   }
 }
 
+const TPLLoader = ({ label = "Loading devices…" }) => (
+  <div style={{
+    display: 'flex', flexDirection: 'column', alignItems: 'center',
+    justifyContent: 'center', padding: '60px 20px', gap: 20,
+  }}>
+    <style>{`
+      @keyframes tpl-pulse {
+        0%   { opacity: 0.15; transform: scale(0.95); }
+        50%  { opacity: 0.7;  transform: scale(1.02); }
+        100% { opacity: 0.15; transform: scale(0.95); }
+      }
+    `}</style>
+    <img src={tplLogo} alt="Loading" style={{ width: 110, height: 'auto', filter: 'brightness(0) invert(1)', animation: 'tpl-pulse 1.6s ease-in-out infinite' }} />
+    <span style={{ color: '#52525b', fontSize: 12, letterSpacing: '0.08em', textTransform: 'uppercase' }}>{label}</span>
+  </div>
+);
+
 const DevicesTable = ({
   devices = [],
   searchTerm = '',
@@ -46,11 +63,11 @@ const DevicesTable = ({
   const navigate = useNavigate();
   const [sortConfig, setSortConfig] = useState({ key: null, direction: 'asc' });
 
-  if (loading) return <TPLLoader label="Loading locators…" />;
+  if (loading) return <TPLLoader label="Loading devices…" />;
 
   const COLUMNS = [
     { key: 'sn',                label: 'Serial Number' },
-    { key: 'name',              label: 'Locator Name' },
+    { key: 'name',              label: 'Device Name' },
     ...(isAdmin ? [
       { key: 'client',              label: 'Client' },
       { key: 'assigned_user_name',  label: 'Assigned User' },
@@ -250,12 +267,12 @@ const DevicesTable = ({
             <circle cx="11" cy="11" r="8" strokeWidth="1.5"/>
             <path d="m21 21-4.35-4.35" strokeWidth="1.5"/>
           </svg>
-          <p>No locators found</p>
+          <p>No devices found</p>
         </div>
       )}
 
       <div className="table-footer">
-        <span>{sorted.length} locator{sorted.length !== 1 ? 's' : ''} shown</span>
+        <span>{sorted.length} device{sorted.length !== 1 ? 's' : ''} shown</span>
       </div>
     </div>
   );

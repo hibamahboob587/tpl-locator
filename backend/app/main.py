@@ -38,12 +38,7 @@ def create_app() -> FastAPI:
     app.include_router(location_router)
     app.include_router(history_router)
     app.include_router(sync_router)
-
-    from app.routers.field_staff import router as field_staff_router
-    app.include_router(field_staff_router)
-    
     start_auto_sync_tasks(app)
-
     
 
     @app.get("/health")
