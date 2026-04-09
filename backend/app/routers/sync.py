@@ -17,9 +17,7 @@ logger = logging.getLogger(__name__)
 
 
 CITYTAG_PASSWORD = "Trakker123"
-
 ZOQIN_BASE_URL = "https://www.zoqin.com/ZQGPS/Device/getLocationListByTimeAndSN"
-
 ZOQIN_DEVICE_JSON_PATH = Path(__file__).resolve().parents[1] / "data" / "zoqin_devices.json"
 
 
@@ -374,7 +372,5 @@ async def sync_all_admin_locations(
         "sync_window_minutes": 10,
         "zoqin_devices_processed": zoqin_devices,
         "zoqin_points_inserted": zoqin_points,
-
     }
-
 

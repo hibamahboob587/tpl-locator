@@ -6,7 +6,7 @@ import { useCityTag } from "../hooks/useCityTag.js";
 import { useAuth } from "../context/AuthContext.jsx";
 import { useDeviceCache } from "../context/DeviceCacheContext.jsx";
 import { useUserCache } from "../context/Usercachecontext.jsx";
-import "./DevicesPage.css";
+import "./HomePage.css";
 
 const SELECT_STYLE = {
   width: "100%",
@@ -31,8 +31,8 @@ const SELECT_OPTION_STYLE = { background: "#27272a", color: "#f4f4f5" };
 const HomePage = () => {
   const { isAdmin } = useAuth();
   const {
-    bindDevice, unbindDevice,
-    adminCreateUser, adminAssignDeviceToUser, adminUpdateDevice,
+    bindDevice, bindDeviceByEmail, unbindDevice,
+    adminCreateUser, adminAssignDeviceToUser,
   } = useCityTag();
 
   const { devices, loading: devicesLoading, error: devicesError, refresh: refreshDevices } = useDeviceCache();
@@ -46,9 +46,9 @@ const HomePage = () => {
   // ── Bind modal state ───────────────────────────────────────────────────────
   const [showBindModal, setShowBindModal] = useState(false);
   const [bindSn, setBindSn]               = useState('');
-  const [bindName, setBindName]           = useState('');
   const [bindClient, setBindClient]       = useState('');
-  const [bindUserId, setBindUserId]       = useState('');
+  const [bindEmail, setBindEmail]         = useState('');
+  const [bindName, setBindName]           = useState('');
   const [bindLoading, setBindLoading]     = useState(false);
   const [bindError, setBindError]         = useState('');
 
@@ -60,26 +60,17 @@ const HomePage = () => {
   const [createUserLoading, setCreateUserLoading]     = useState(false);
   const [createUserError, setCreateUserError]         = useState('');
 
-  // ── Edit device modal state ────────────────────────────────────────────────
-  const [editDevice, setEditDevice]               = useState(null);
-  const [editDeviceName, setEditDeviceName]       = useState('');
-  const [editDeviceClient, setEditDeviceClient]   = useState('');
-  const [editDeviceRegion, setEditDeviceRegion]   = useState('');
-  const [editDeviceLoading, setEditDeviceLoading] = useState(false);
-  const [editDeviceError, setEditDeviceError]     = useState('');
-
   const loading = viewMode === 'users' ? usersLoading : devicesLoading;
 
   const openBindModal = (sn = '') => {
-    setBindError(''); setBindClient(''); setBindName('');
+    setBindError(''); setBindClient(''); setBindName(''); setBindEmail('');
 
     if (isAdmin) {
       const unbound   = devices.filter((d) => !d.assigned_user_name && !d.user_id);
       const defaultSn = sn || (unbound.length > 0 ? unbound[0].sn : '');
       setBindSn(defaultSn);
-      const defaultUserId = users.length > 0 ? users[0].id : '';
-      setBindUserId(defaultUserId);
     } else {
+      // For users: pre-fill if a sn was passed, otherwise empty so they can type
       setBindSn(sn || '');
     }
 
@@ -88,15 +79,15 @@ const HomePage = () => {
 
   const closeBindModal = () => {
     setShowBindModal(false);
-    setBindSn(''); setBindName(''); setBindClient(''); setBindUserId(''); setBindError('');
+    setBindSn(''); setBindClient(''); setBindEmail(''); setBindName(''); setBindError('');
   };
 
   const handleBind = async () => {
     if (isAdmin) {
-      if (!bindSn || !bindUserId) { setBindError('Please select a device and a user'); return; }
+      if (!bindSn.trim() || !bindEmail.trim()) { setBindError('Please enter a device serial and user email'); return; }
       setBindError(''); setBindLoading(true);
       try {
-        await adminAssignDeviceToUser(bindUserId, bindSn, { name: bindName.trim(), client: bindClient.trim() });
+        await bindDeviceByEmail({ sn: bindSn.trim(), email: bindEmail.trim(), client: bindClient.trim() });
         refreshDevices(); refreshUsers(); closeBindModal();
       } catch (err) {
         setBindError(err.message || 'Failed to bind device');
@@ -107,7 +98,7 @@ const HomePage = () => {
       if (!bindSn.trim()) { setBindError('Please enter a device serial number'); return; }
       setBindError(''); setBindLoading(true);
       try {
-        await bindDevice({ sn: bindSn.trim(), label: bindName.trim() || undefined });
+        await bindDevice({ sn: bindSn.trim(), label: bindName.trim(), client: bindClient.trim() });
         refreshDevices(); closeBindModal();
       } catch (err) {
         setBindError(err.message || 'Failed to bind device');
@@ -128,37 +119,6 @@ const HomePage = () => {
     if (!window.confirm(`Remove binding for ${sn}?`)) return;
     try { await unbindDevice(sn); refreshDevices(); }
     catch (err) { setError(err.message || "Failed to unbind"); }
-  };
-
-  // ── Edit device ────────────────────────────────────────────────────────────
-  const openEditDevice = (device) => {
-    setEditDeviceName(device.name || '');
-    setEditDeviceClient(device.client || '');
-    setEditDeviceRegion(device.region || '');
-    setEditDeviceError('');
-    setEditDevice(device);
-  };
-
-  const closeEditDevice = () => {
-    setEditDevice(null);
-    setEditDeviceName(''); setEditDeviceClient(''); setEditDeviceRegion(''); setEditDeviceError('');
-  };
-
-  const handleEditDevice = async () => {
-    if (!editDevice) return;
-    setEditDeviceLoading(true); setEditDeviceError('');
-    try {
-      await adminUpdateDevice(editDevice.sn, {
-        name:   editDeviceName.trim()   || undefined,
-        client: editDeviceClient.trim() || undefined,
-        region: editDeviceRegion.trim() || undefined,
-      });
-      closeEditDevice(); refreshDevices();
-    } catch (err) {
-      setEditDeviceError(err.message || 'Failed to update device');
-    } finally {
-      setEditDeviceLoading(false);
-    }
   };
 
   // ── Create user ────────────────────────────────────────────────────────────
@@ -277,7 +237,6 @@ const HomePage = () => {
               isAdmin={isAdmin}
               onBind={(sn) => openBindModal(sn)}
               onUnbind={isAdmin ? handleUnbind : handleUserUnbind}
-              onEdit={isAdmin ? openEditDevice : undefined}
               loading={loading}
             />
           )}
@@ -325,22 +284,23 @@ const HomePage = () => {
                     )}
                   </div>
                   <div className="hp-modal-field">
-                    <label>Assign to User <span className="required">*</span></label>
-                    {users.length === 0 ? (
-                      <p style={{ color:'#71717a', fontSize:12, margin:'4px 0 0' }}>No users available</p>
-                    ) : (
-                      <select value={bindUserId} onChange={(e) => setBindUserId(e.target.value)} style={SELECT_STYLE}>
-                        {users.map((u) => (
-                          <option key={u.id} value={u.id} style={SELECT_OPTION_STYLE}>
-                            {u.email}{u.name ? ` (${u.name})` : ''}
-                          </option>
-                        ))}
-                      </select>
-                    )}
-                  </div>
-                  <div className="hp-modal-field">
-                    <label>Device Name <span style={{ fontWeight:400, color:'#71717a' }}>(optional)</span></label>
-                    <input type="text" placeholder="e.g. My Car, Office Van…" value={bindName} onChange={(e) => setBindName(e.target.value)} />
+                    <label>User Email (select or type) <span className="required">*</span></label>
+                    <input
+                      type="email"
+                      list="userEmails"
+                      placeholder="user@example.com or select from list"
+                      value={bindEmail}
+                      onChange={(e) => setBindEmail(e.target.value)}
+                      style={{ width: '100%', padding: '10px 12px', background: '#27272a', border: `1px solid ${bindError ? '#7f1d1d' : '#3f3f46'}`, borderRadius: 8, color: '#f4f4f5', fontSize: 13, outline: 'none', boxSizing: 'border-box' }}
+                    />
+                    <datalist id="userEmails">
+                      {users.map((u) => (
+                        <option key={u.id} value={u.email} />
+                      ))}
+                    </datalist>
+                    <p style={{ margin: '6px 0 0', fontSize: 11, color: '#52525b' }}>
+                      Select from existing users or type a new email to bind this device.
+                    </p>
                   </div>
                   <div className="hp-modal-field">
                     <label>Client <span style={{ fontWeight:400, color:'#71717a' }}>(optional)</span></label>
@@ -372,17 +332,15 @@ const HomePage = () => {
                     )}
                   </div>
                   <div className="hp-modal-field">
-                    <label>Device Name <span style={{ fontWeight:400, color:'#71717a' }}>(optional)</span></label>
+                    <label>Device Name (optional)</label>
                     <input
                       type="text"
-                      placeholder="e.g. My Car, Office Van…"
+                      placeholder="e.g. My Device"
                       value={bindName}
                       onChange={(e) => setBindName(e.target.value)}
-                      onKeyDown={(e) => e.key === 'Enter' && handleBind()}
                       style={{
                         width: '100%', padding: '10px 12px', background: '#27272a',
-                        border: '1px solid #3f3f46',
-                        borderRadius: 8, color: '#f4f4f5', fontSize: 13,
+                        border: '1px solid #3f3f46', borderRadius: 8, color: '#f4f4f5', fontSize: 13,
                         outline: 'none', boxSizing: 'border-box',
                       }}
                     />
@@ -396,74 +354,9 @@ const HomePage = () => {
               <button
                 className="hp-modal-confirm"
                 onClick={handleBind}
-                disabled={bindLoading || (isAdmin ? (!bindSn || !bindUserId) : !bindSn.trim())}
+                disabled={bindLoading || (isAdmin ? (!bindSn.trim() || !bindEmail.trim()) : !bindSn.trim())}
               >
                 {bindLoading ? "Saving…" : "Bind Device"}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* ── Edit Device Modal ─────────────────────────────────────── */}
-      {editDevice && (
-        <div className="hp-modal-overlay" onClick={closeEditDevice}>
-          <div className="hp-modal" onClick={(e) => e.stopPropagation()}>
-            <div className="hp-modal-header">
-              <div className="hp-modal-title-wrap">
-                <div className="hp-modal-icon">
-                  <svg viewBox="0 0 20 20" fill="currentColor">
-                    <path d="M13.586 3.586a2 2 0 112.828 2.828l-8.5 8.5a1 1 0 01-.39.243l-3 1a1 1 0 01-1.266-1.266l1-3a1 1 0 01.243-.39l8.5-8.5z"/>
-                  </svg>
-                </div>
-                <h3>Edit Device</h3>
-              </div>
-              <button className="hp-modal-close" onClick={closeEditDevice}>✕</button>
-            </div>
-            <div className="hp-modal-body">
-              {editDeviceError && (
-                <div style={{ padding:'8px 12px', marginBottom:12, background:'rgba(127,29,29,0.2)', border:'1px solid rgba(127,29,29,0.4)', borderRadius:6, color:'#fca5a5', fontSize:12 }}>
-                  {editDeviceError}
-                </div>
-              )}
-              <div className="hp-modal-field">
-                <label>Serial Number (read-only)</label>
-                <input type="text" value={editDevice.sn} readOnly style={{ opacity: 0.5, cursor: 'not-allowed' }} />
-              </div>
-              <div className="hp-modal-field">
-                <label>Device Name</label>
-                <input
-                  type="text"
-                  placeholder="e.g. Office Van"
-                  value={editDeviceName}
-                  onChange={(e) => setEditDeviceName(e.target.value)}
-                  autoFocus
-                />
-              </div>
-              <div className="hp-modal-field">
-                <label>Client</label>
-                <input
-                  type="text"
-                  placeholder="e.g. TPL Trakker"
-                  value={editDeviceClient}
-                  onChange={(e) => setEditDeviceClient(e.target.value)}
-                />
-              </div>
-              <div className="hp-modal-field">
-                <label>Region</label>
-                <input
-                  type="text"
-                  placeholder="e.g. Wagha Town"
-                  value={editDeviceRegion}
-                  onChange={(e) => setEditDeviceRegion(e.target.value)}
-                  onKeyDown={(e) => e.key === 'Enter' && handleEditDevice()}
-                />
-              </div>
-            </div>
-            <div className="hp-modal-footer">
-              <button className="hp-modal-cancel" onClick={closeEditDevice} disabled={editDeviceLoading}>Cancel</button>
-              <button className="hp-modal-confirm" onClick={handleEditDevice} disabled={editDeviceLoading}>
-                {editDeviceLoading ? 'Saving…' : 'Save Changes'}
               </button>
             </div>
           </div>
@@ -519,3 +412,4 @@ const HomePage = () => {
 };
 
 export default HomePage;
+

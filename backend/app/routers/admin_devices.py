@@ -204,34 +204,3 @@ async def admin_add_device(
     except Exception as err:
         logger.exception("admin_add_device failed admin=%s sn=%s", current_admin.email, payload.sn)
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed: {str(err)}")
-
-
-class UpdateDeviceRequest(BaseModel):
-    name: str | None = None
-    client: str | None = None
-    region: str | None = None
-
-
-@router.put("/devices/{sn}")
-async def admin_update_device(
-    sn: str,
-    payload: UpdateDeviceRequest,
-    current_admin: Annotated[AdminInDB, Depends(get_current_admin)],
-    mongo: Annotated[MongoService, Depends(get_mongo_service)],
-):
-    logger.info("admin_update_device started admin=%s sn=%s", current_admin.email, sn)
-    try:
-        device = await mongo.get_device_by_sn(sn)
-        if not device:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Device not found")
-        if str(device.admin_id) != str(current_admin.id):
-            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Device not owned by this admin")
-
-        updated = await mongo.update_device(sn, payload.name, payload.client, payload.region)
-        logger.info("admin_update_device completed admin=%s sn=%s", current_admin.email, sn)
-        return {"status": "ok", "device": {"id": str(updated.id), "sn": updated.sn, "name": updated.name, "client": updated.client, "region": updated.region}}
-    except HTTPException:
-        raise
-    except Exception as err:
-        logger.exception("admin_update_device failed admin=%s sn=%s", current_admin.email, sn)
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed: {str(err)}")
